@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+  }
+}
+
+/* 画像削除ボタン（JSで動的生成のためTailwindスキャン対象外） */
+.img-remove-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  background-color: oklch(63.7% .237 25.331); /* red-500 */
+  color: white;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  cursor: pointer;
+  border: none;
+  line-height: 1;
+  transition: background-color .15s;
+}
+.img-remove-btn:hover {
+  background-color: oklch(50.5% .213 27.518); /* red-700 */
+}

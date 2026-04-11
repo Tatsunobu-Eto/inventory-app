@@ -1,0 +1,58 @@
+{{define "login.html"}}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ログイン - 消耗品管理</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-sm">
+    <!-- Card -->
+    <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+      <!-- Top accent bar -->
+      <div class="h-1.5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600"></div>
+
+      <div class="p-8">
+        <!-- Logo area -->
+        <div class="flex flex-col items-center mb-8">
+          <div class="w-14 h-14 bg-indigo-100 rounded-2xl flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          </div>
+          <h1 class="text-xl font-bold text-slate-800">消耗品管理システム</h1>
+          <p class="text-sm text-slate-400 mt-1">アカウントにサインイン</p>
+        </div>
+
+        {{if .Error}}
+        <div class="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-4 py-3 mb-5">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          {{.Error}}
+        </div>
+        {{end}}
+
+        <form method="POST" action="/login" class="space-y-5">
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1.5">ユーザー名</label>
+            <input type="text" name="username" required autofocus
+                   class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1.5">パスワード</label>
+            <input type="password" name="password" required
+                   class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
+          </div>
+          <button type="submit"
+                  class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 mt-2">
+            ログイン
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+{{end}}

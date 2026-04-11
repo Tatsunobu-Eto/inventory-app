@@ -1,0 +1,106 @@
+{{define "content"}}
+<div class="max-w-lg">
+  <h1 class="text-2xl font-bold text-slate-800 mb-6">消耗品登録（管理者）</h1>
+
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <form hx-post="/admin/items" hx-swap="none" hx-encoding="multipart/form-data" class="space-y-5">
+      <div>
+        <label class="block text-sm font-medium text-slate-600 mb-1.5">タイトル</label>
+        <input type="text" name="title" required
+               class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 mb-1.5">説明</label>
+        <textarea name="description" rows="4"
+                  class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 mb-1.5">所有者</label>
+        <select name="owner_id" required
+                class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white">
+          {{range .Users}}
+          <option value="{{.ID}}">{{.DisplayName}} (@{{.Username}})</option>
+          {{end}}
+        </select>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="block text-sm font-medium text-slate-600">画像</label>
+          <span id="image-count" class="text-xs text-slate-400">0 / 5</span>
+        </div>
+        <div id="image-preview" class="flex flex-wrap gap-3 mb-3"></div>
+        <button type="button" id="add-image-btn"
+                class="inline-flex items-center gap-1.5 border border-dashed border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          画像を追加
+        </button>
+      </div>
+      <button type="submit"
+              class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        登録
+      </button>
+    </form>
+  </div>
+</div>
+<script>
+  const MAX_IMAGES = 5;
+  let imageCount = 0;
+
+  function updateUI() {
+    document.getElementById('image-count').textContent = imageCount + ' / ' + MAX_IMAGES;
+    document.getElementById('add-image-btn').style.display = imageCount >= MAX_IMAGES ? 'none' : '';
+  }
+
+  document.getElementById('add-image-btn').addEventListener('click', function () {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.name = 'images';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+
+    input.addEventListener('change', function () {
+      if (!this.files[0]) return;
+      const file = this.files[0];
+      imageCount++;
+
+      const url = URL.createObjectURL(file);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'relative flex flex-col items-center gap-1';
+
+      const img = document.createElement('img');
+      img.src = url;
+      img.className = 'w-20 h-20 object-cover rounded-lg border border-slate-200';
+      img.onload = function () { URL.revokeObjectURL(url); };
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'img-remove-btn';
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', function () {
+        wrapper.remove();
+        input.remove();
+        imageCount--;
+        updateUI();
+      });
+
+      const name = document.createElement('span');
+      name.className = 'text-xs text-slate-500 max-w-[80px] truncate';
+      name.textContent = file.name;
+
+      wrapper.appendChild(img);
+      wrapper.appendChild(removeBtn);
+      wrapper.appendChild(name);
+      document.getElementById('image-preview').appendChild(wrapper);
+      updateUI();
+    });
+
+    document.querySelector('form').appendChild(input);
+    input.click();
+  });
+</script>
+{{end}}

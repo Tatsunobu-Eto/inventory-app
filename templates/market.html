@@ -1,0 +1,26 @@
+{{define "content"}}
+<div class="max-w-5xl mx-auto">
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-800 mb-4">マーケット</h1>
+    <!-- Search bar -->
+    <div class="relative max-w-lg">
+      <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+      </svg>
+      <input type="text" name="q" placeholder="アイテムを検索..."
+             value="{{.Query}}"
+             hx-get="/market"
+             hx-trigger="keyup changed delay:500ms"
+             hx-target="#item-list"
+             hx-push-url="false"
+             class="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white shadow-sm transition-colors">
+    </div>
+  </div>
+
+  <!-- Item grid -->
+  <div id="item-list">
+    {{template "item_list_partial.html" .}}
+  </div>
+</div>
+{{end}}

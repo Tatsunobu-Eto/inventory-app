@@ -1,0 +1,6 @@
+inventory.exe
+inventory
+node_modules/
+uploads/
+*.tar
+.env

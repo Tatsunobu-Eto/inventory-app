@@ -1,0 +1,11 @@
+{{define "content"}}
+<div>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-slate-800">マイアイテム</h1>
+  </div>
+
+  <div id="my-items-list">
+    {{template "my_items_partial.html" .}}
+  </div>
+</div>
+{{end}}

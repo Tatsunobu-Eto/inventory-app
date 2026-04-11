@@ -1,0 +1,585 @@
+package handlers
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	mw "inventory-app/middleware"
+	"inventory-app/models"
+
+	"github.com/lib/pq"
+)
+
+type deptWithUsers struct {
+	models.Department
+	Users []models.User
+}
+
+// --- System Admin handlers ---
+
+func (e *Env) SysAdminDepartments(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	deps, err := models.ListDepartments(e.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	depts := make([]deptWithUsers, 0, len(deps))
+	for _, d := range deps {
+		users, err := models.ListUsersByDepartment(e.DB, d.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		depts = append(depts, deptWithUsers{Department: d, Users: users})
+	}
+	e.render(w, "sysadmin_departments.html", map[string]any{"User": user, "Depts": depts})
+}
+
+func (e *Env) SysAdminCreateDepartment(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("name")
+	if name == "" {
+		triggerToast(w, "部門名は必須です")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	_, err := models.CreateDepartment(e.DB, name)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			triggerToast(w, "その部門名はすでに存在します")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
+		}
+		triggerToast(w, "部門の作成に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "部門を作成しました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
+	deptID, _ := strconv.Atoi(r.FormValue("department_id"))
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	displayName := r.FormValue("display_name")
+
+	if username == "" || password == "" || deptID == 0 {
+		triggerToast(w, "すべての項目を入力してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	_, err := models.CreateUser(e.DB, &deptID, username, password, displayName, "admin")
+	if err != nil {
+		triggerToast(w, "ユーザー作成に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "部門管理者を作成しました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminPromoteToAdmin(w http.ResponseWriter, r *http.Request) {
+	userID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, userID)
+	if err != nil {
+		triggerToast(w, "ユーザーが見つかりません")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if target.Role != "user" {
+		triggerToast(w, "このユーザーは昇格できません")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdateUserRole(e.DB, userID, "admin"); err != nil {
+		triggerToast(w, "ロールの更新に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+" を管理者にしました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminDemoteToUser(w http.ResponseWriter, r *http.Request) {
+	userID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, userID)
+	if err != nil {
+		triggerToast(w, "ユーザーが見つかりません")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if target.Role != "admin" {
+		triggerToast(w, "このユーザーは降格できません")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdateUserRole(e.DB, userID, "user"); err != nil {
+		triggerToast(w, "ロールの更新に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+" を一般ユーザーにしました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminAllItems(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+
+	query := r.URL.Query().Get("q")
+	status := r.URL.Query().Get("status")
+	ownerID, _ := strconv.Atoi(r.URL.Query().Get("owner_id"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	total, err := models.CountItems(e.DB, models.ItemFilter{
+		DepartmentID: 0,
+		Status:       status,
+		OwnerID:      ownerID,
+		Query:        query,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	items, err := models.ListItems(e.DB, models.ItemFilter{
+		DepartmentID: 0, // 全部門
+		Status:       status,
+		OwnerID:      ownerID,
+		Query:        query,
+		Limit:        perPage,
+		Offset:       (page - 1) * perPage,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	allUsers, err := models.ListAllUsers(e.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	imageMap := collectImages(e, items)
+
+	e.render(w, "sysadmin_all_items.html", map[string]any{
+		"User":       user,
+		"Items":      items,
+		"ImageMap":   imageMap,
+		"Query":      query,
+		"Status":     status,
+		"OwnerID":    ownerID,
+		"AllUsers":   allUsers,
+		"Page":       page,
+		"TotalPages": totalPages,
+	})
+}
+
+// --- Department Admin handlers ---
+
+func (e *Env) AdminUsers(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	if user.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+
+	users, err := models.ListUsersByDepartment(e.DB, *user.DepartmentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	dept, _ := models.GetDepartment(e.DB, *user.DepartmentID)
+	allDepts, err := models.ListDepartments(e.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	e.render(w, "admin_users.html", map[string]any{
+		"User":        user,
+		"Users":       users,
+		"Department":  dept,
+		"Departments": allDepts,
+	})
+}
+
+func (e *Env) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	currentUser := mw.CurrentUser(r)
+	if currentUser.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	displayName := r.FormValue("display_name")
+
+	if username == "" || password == "" {
+		triggerToast(w, "すべての項目を入力してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	_, err := models.CreateUser(e.DB, currentUser.DepartmentID, username, password, displayName, "user")
+	if err != nil {
+		triggerToast(w, "ユーザー作成に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "ユーザーを作成しました")
+	w.Header().Set("HX-Redirect", "/admin/users")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) AdminCreateItem(w http.ResponseWriter, r *http.Request) {
+	currentUser := mw.CurrentUser(r)
+	if currentUser.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+
+	title := r.FormValue("title")
+	description := r.FormValue("description")
+	ownerID, _ := strconv.Atoi(r.FormValue("owner_id"))
+
+	if title == "" || ownerID == 0 {
+		triggerToast(w, "タイトルと所有者は必須です")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	item, err := models.CreateItem(e.DB, *currentUser.DepartmentID, title, description, ownerID, currentUser.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := e.SaveUploadedImages(r, item.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "消耗品を登録しました")
+	w.Header().Set("HX-Redirect", "/admin/items/new")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) AdminCreateItemForm(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	if user.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+
+	users, err := models.ListUsersByDepartment(e.DB, *user.DepartmentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	e.render(w, "admin_item_form.html", map[string]any{"User": user, "Users": users})
+}
+
+func (e *Env) AdminDeptItems(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	if user.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	status := r.URL.Query().Get("status")
+	ownerID, _ := strconv.Atoi(r.URL.Query().Get("owner_id"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	total, err := models.CountItems(e.DB, models.ItemFilter{
+		DepartmentID: *user.DepartmentID,
+		Query:        query,
+		Status:       status,
+		OwnerID:      ownerID,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	items, err := models.ListItems(e.DB, models.ItemFilter{
+		DepartmentID: *user.DepartmentID,
+		Query:        query,
+		Status:       status,
+		OwnerID:      ownerID,
+		Limit:        perPage,
+		Offset:       (page - 1) * perPage,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	dept, _ := models.GetDepartment(e.DB, *user.DepartmentID)
+	deptUsers, err := models.ListUsersByDepartment(e.DB, *user.DepartmentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	imageMap := collectImages(e, items)
+
+	e.render(w, "admin_dept_items.html", map[string]any{
+		"User":       user,
+		"Items":      items,
+		"ImageMap":   imageMap,
+		"Department": dept,
+		"Query":      query,
+		"Status":     status,
+		"OwnerID":    ownerID,
+		"DeptUsers":  deptUsers,
+		"Page":       page,
+		"TotalPages": totalPages,
+	})
+}
+
+// --- Department Admin: delete user / reset password ---
+
+func (e *Env) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	currentUser := mw.CurrentUser(r)
+	if currentUser.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		http.Error(w, "ユーザーが見つかりません", http.StatusNotFound)
+		return
+	}
+	if target.DepartmentID == nil || *target.DepartmentID != *currentUser.DepartmentID || target.Role != "user" {
+		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+	paths, err := models.DeleteUserCascade(e.DB, targetID)
+	if err != nil {
+		triggerToast(w, "削除に失敗しました: "+err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	for _, p := range paths {
+		os.Remove(filepath.Join(uploadDir, p))
+	}
+	triggerToast(w, target.DisplayName+"を削除しました")
+	w.Header().Set("HX-Redirect", "/admin/users")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
+	currentUser := mw.CurrentUser(r)
+	if currentUser.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		http.Error(w, "ユーザーが見つかりません", http.StatusNotFound)
+		return
+	}
+	if target.DepartmentID == nil || *target.DepartmentID != *currentUser.DepartmentID || target.Role != "user" {
+		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+	newPassword := r.FormValue("new_password")
+	if newPassword == "" {
+		triggerToast(w, "新しいパスワードを入力してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdatePassword(e.DB, targetID, newPassword); err != nil {
+		triggerToast(w, "パスワードリセットに失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+"のパスワードをリセットしました")
+	w.Header().Set("HX-Redirect", "/admin/users")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) AdminTransferUser(w http.ResponseWriter, r *http.Request) {
+	currentUser := mw.CurrentUser(r)
+	if currentUser.DepartmentID == nil {
+		http.Error(w, "部門未所属", http.StatusForbidden)
+		return
+	}
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		triggerToast(w, "ユーザーが見つかりません")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if target.DepartmentID == nil || *target.DepartmentID != *currentUser.DepartmentID || target.Role != "user" {
+		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+	newDeptID, err := strconv.Atoi(r.FormValue("department_id"))
+	if err != nil || newDeptID == 0 {
+		triggerToast(w, "異動先部門を選択してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if newDeptID == *currentUser.DepartmentID {
+		triggerToast(w, "異動先は現在の部門と異なる部門を選択してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdateUserDepartment(e.DB, targetID, newDeptID); err != nil {
+		triggerToast(w, "異動に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+" を異動しました")
+	w.Header().Set("HX-Redirect", "/admin/users")
+	w.WriteHeader(http.StatusOK)
+}
+
+// --- System Admin: delete user / reset password ---
+
+func (e *Env) SysAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		http.Error(w, "ユーザーが見つかりません", http.StatusNotFound)
+		return
+	}
+	paths, err := models.DeleteUserCascade(e.DB, targetID)
+	if err != nil {
+		triggerToast(w, "削除に失敗しました: "+err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	for _, p := range paths {
+		os.Remove(filepath.Join(uploadDir, p))
+	}
+	triggerToast(w, target.DisplayName+"を削除しました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminResetPassword(w http.ResponseWriter, r *http.Request) {
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		http.Error(w, "ユーザーが見つかりません", http.StatusNotFound)
+		return
+	}
+	newPassword := r.FormValue("new_password")
+	if newPassword == "" {
+		triggerToast(w, "新しいパスワードを入力してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdatePassword(e.DB, targetID, newPassword); err != nil {
+		triggerToast(w, "パスワードリセットに失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+"のパスワードをリセットしました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *Env) SysAdminTransferUser(w http.ResponseWriter, r *http.Request) {
+	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	target, err := models.GetUserByID(e.DB, targetID)
+	if err != nil {
+		triggerToast(w, "ユーザーが見つかりません")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if target.Role == "sysadmin" {
+		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+	newDeptID, err := strconv.Atoi(r.FormValue("department_id"))
+	if err != nil || newDeptID == 0 {
+		triggerToast(w, "異動先部門を選択してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if target.DepartmentID != nil && *target.DepartmentID == newDeptID {
+		triggerToast(w, "異動先は現在の部門と異なる部門を選択してください")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if err := models.UpdateUserDepartment(e.DB, targetID, newDeptID); err != nil {
+		triggerToast(w, "異動に失敗しました")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	triggerToast(w, target.DisplayName+" を異動しました")
+	w.Header().Set("HX-Redirect", "/sysadmin/departments")
+	w.WriteHeader(http.StatusOK)
+}
