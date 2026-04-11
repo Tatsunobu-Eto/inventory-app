@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+const maxImages = 5
 
 // const uploadDir = "uploads" // 削除：handlers/images.goで定義済み
 
@@ -29,10 +32,6 @@ func collectImages(e *Env, items []models.Item) map[int][]models.ItemImage {
 
 func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	if user.DepartmentID == nil {
-		http.Error(w, "部門未所属", http.StatusForbidden)
-		return
-	}
 
 	query := r.URL.Query().Get("q")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -40,32 +39,42 @@ func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
+	total, err := models.CountItems(e.DB, models.ItemFilter{
+		Status: "market",
+		Query:  query,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
 	items, err := models.ListItems(e.DB, models.ItemFilter{
-		DepartmentID: *user.DepartmentID,
-		Status:       "market",
-		Query:        query,
-		Limit:        perPage + 1,
-		Offset:       (page - 1) * perPage,
+		Status: "market",
+		Query:  query,
+		Limit:  perPage,
+		Offset: (page - 1) * perPage,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	hasMore := len(items) > perPage
-	if hasMore {
-		items = items[:perPage]
-	}
-
 	imageMap := collectImages(e, items)
 
 	data := map[string]any{
-		"User":     user,
-		"Items":    items,
-		"ImageMap": imageMap,
-		"Query":    query,
-		"Page":     page,
-		"HasMore":  hasMore,
+		"User":       user,
+		"Items":      items,
+		"ImageMap":   imageMap,
+		"Query":      query,
+		"Page":       page,
+		"TotalPages": totalPages,
 	}
 
 	if r.Header.Get("HX-Request") == "true" {
@@ -151,6 +160,12 @@ func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.MultipartForm != nil && len(r.MultipartForm.File["images"]) > maxImages {
+		triggerToast(w, fmt.Sprintf("画像は最大%d枚までです", maxImages))
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
 	item, err := models.CreateItem(e.DB, *user.DepartmentID, title, description, user.ID, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -169,7 +184,11 @@ func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 
 func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	itemID, _ := strconv.Atoi(r.FormValue("item_id"))
+	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
+	if convErr != nil || itemID == 0 {
+		http.Error(w, "無効なアイテムIDです", http.StatusBadRequest)
+		return
+	}
 
 	if err := models.PutItemOnMarket(e.DB, itemID, user.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -183,7 +202,11 @@ func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 
 func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	itemID, _ := strconv.Atoi(r.FormValue("item_id"))
+	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
+	if convErr != nil || itemID == 0 {
+		http.Error(w, "無効なアイテムIDです", http.StatusBadRequest)
+		return
+	}
 
 	if err := models.WithdrawItem(e.DB, itemID, user.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -197,7 +220,22 @@ func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 
 func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	itemID, _ := strconv.Atoi(r.FormValue("item_id"))
+	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
+	if convErr != nil || itemID == 0 {
+		http.Error(w, "無効なアイテムIDです", http.StatusBadRequest)
+		return
+	}
+
+	// 部門チェック: アイテムが自分の部門に属しているか確認
+	item, err := models.GetItem(e.DB, itemID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID {
+		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
 
 	ok, err := models.ApplyForItem(e.DB, itemID, user.ID)
 	if err != nil {
@@ -242,6 +280,12 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 	item, err := models.GetItem(e.DB, itemID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 部門チェック: sysadmin以外は自部門のアイテムのみアクセス可
+	if user.Role != "sysadmin" && (user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
+		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
 
@@ -303,7 +347,6 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	currentImageCount := len(existingImages)
-	maxImages := 5
 
 	if r.MultipartForm != nil && r.MultipartForm.File["images"] != nil {
 		newFiles := r.MultipartForm.File["images"]
@@ -397,9 +440,13 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, p := range filePaths {
-		os.Remove(filepath.Join(uploadDir, p))
+		if err := os.Remove(filepath.Join(uploadDir, p)); err != nil && !os.IsNotExist(err) {
+			log.Printf("warn: failed to remove file %s: %v", p, err)
+		}
 	}
-	os.Remove(filepath.Join(uploadDir, strconv.Itoa(itemID)))
+	if err := os.Remove(filepath.Join(uploadDir, strconv.Itoa(itemID))); err != nil && !os.IsNotExist(err) {
+		log.Printf("warn: failed to remove dir for item %d: %v", itemID, err)
+	}
 
 	triggerToast(w, "アイテムを削除しました")
 	w.Header().Set("HX-Redirect", "/my-items")
@@ -437,7 +484,9 @@ func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	os.Remove(filepath.Join(uploadDir, filePath))
+	if err := os.Remove(filepath.Join(uploadDir, filePath)); err != nil && !os.IsNotExist(err) {
+		log.Printf("warn: failed to remove file %s: %v", filePath, err)
+	}
 	triggerToast(w, "画像を削除しました")
 	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusOK)

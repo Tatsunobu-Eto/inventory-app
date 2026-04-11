@@ -25,7 +25,7 @@
 | セッション名 | `"session"` |
 | 保存先 | ブラウザCookie（署名済み） |
 | 署名アルゴリズム | HMAC-SHA256（gorilla/securecookieによる） |
-| 署名キー | 環境変数 `SESSION_KEY`（未設定時は `"default-dev-key-change-me!!"` のデフォルト値） |
+| 署名キー | 環境変数 `SESSION_KEY`（**必須**。未設定時は `log.Fatal` でアプリが起動を中断する） |
 | 保存データ | `user_id`（int型） |
 
 ### ログアウトフロー
@@ -109,6 +109,21 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler
 | マーケットアイテムへの申請 | - | ✅ | ✅ |
 | **ダッシュボード** | | | |
 | ダッシュボード閲覧 | ✅ | ✅ | ✅ |
+| **ユーザー操作（admin管理下）** | | | |
+| 自部門ユーザー削除 | - | ✅（userロールのみ） | - |
+| 自部門ユーザーパスワードリセット | - | ✅（userロールのみ） | - |
+| 自部門ユーザー他部門異動 | - | ✅（userロールのみ） | - |
+| **ユーザー操作（sysadmin管理下）** | | | |
+| 任意ユーザー削除 | ✅ | - | - |
+| 任意ユーザーパスワードリセット | ✅ | - | - |
+| 任意ユーザー他部門異動（sysadmin除く） | ✅ | - | - |
+| userをadminに昇格 | ✅ | - | - |
+| adminをuserに降格 | ✅ | - | - |
+| **取引・プロフィール** | | | |
+| 取引履歴閲覧（自分が関与した取引） | - | ✅ | ✅ |
+| パスワード変更（自分のパスワード） | ✅ | ✅ | ✅ |
+| **全アイテム閲覧** | | | |
+| 全部門アイテム一覧 | ✅ | - | - |
 
 ※ `-` は該当ページ自体へのアクセス権限がないことを示す（403またはリダイレクト）
 
@@ -124,7 +139,7 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler
 4. 環境変数未設定の場合はログに警告を出してスキップ
 ```
 
-**注意：** 初回セットアップ後は `INIT_SYSADMIN_USER` / `INIT_SYSADMIN_PASS` の値を変更しても再実行されないため、パスワード変更は直接DBを操作する必要がある（現バージョンにパスワード変更UIはない）。詳細は [09_known_limitations.md](09_known_limitations.md) §2 を参照。
+**注意：** 初回セットアップ後は `INIT_SYSADMIN_USER` / `INIT_SYSADMIN_PASS` の値を変更しても再実行されないため（`seedSysadmin` の冪等性確保のため）、sysadmin のパスワードは `GET /profile/password` の UI から変更してください。
 
 ## パスワードハッシュ
 

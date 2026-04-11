@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"inventory-app/models"
 	mw "inventory-app/middleware"
+	"inventory-app/models"
 )
 
 func (e *Env) LoginPage(w http.ResponseWriter, r *http.Request) {
@@ -15,8 +15,15 @@ func (e *Env) LoginPost(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
+	// タイミング攻撃対策: ユーザーが存在しない場合もダミーハッシュでbcryptを実行し応答時間を均一化
+	const dummyHash = "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
 	user, err := models.GetUserByUsername(e.DB, username)
-	if err != nil || !models.CheckPassword(user.PasswordHash, password) {
+	hashToCheck := dummyHash
+	if err == nil {
+		hashToCheck = user.PasswordHash
+	}
+	passwordOK := models.CheckPassword(hashToCheck, password)
+	if err != nil || !passwordOK {
 		triggerToast(w, "ユーザー名またはパスワードが正しくありません")
 		e.render(w, "login.html", map[string]any{"Error": "ユーザー名またはパスワードが正しくありません"})
 		return

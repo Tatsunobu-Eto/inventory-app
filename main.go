@@ -78,7 +78,7 @@ func main() {
 
 	sessionKey := os.Getenv("SESSION_KEY")
 	if sessionKey == "" {
-		sessionKey = "default-dev-key-change-me!!"
+		log.Fatal("SESSION_KEY environment variable is not set. Please set a strong random key.")
 	}
 	store := sessions.NewCookieStore([]byte(sessionKey))
 

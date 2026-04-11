@@ -52,14 +52,14 @@
 #### マーケット一覧（GET /market）
 
 - ログインユーザーの部門の `status = 'market'` のアイテムを取得
-- ページネーション: 1ページ20件
+- ページネーション: 1ページ10件
 - 検索: タイトル・説明文のILIKE（部分一致、大文字小文字無視）
 - ソート: 登録日時降順
 
 #### 管理者アイテム一覧（GET /admin/items）
 
 - ログインadminの部門の全ステータスのアイテムを取得
-- ページネーション: 1ページ20件
+- ページネーション: 1ページ10件
 - 検索: タイトル・説明文のILIKE
 
 ### 1.4 アイテム詳細（GET /items/{item_id}）
@@ -82,6 +82,28 @@
 例: 既存3枚 + 追加3枚 = 6枚 → エラー
     既存3枚 + 追加2枚 = 5枚 → OK
 ```
+
+### 1.6 アイテム削除（POST /items/{item_id}/delete）
+
+**対象：** user, admin（所有者かつ status = private のアイテムのみ）
+
+**処理フロー：**
+```
+1. URL パスから item_id を取得
+2. models.GetItemByID でアイテムを取得
+3. ログインユーザーが owner_id でなければ 403
+4. item.Status != 'private' なら 422 + エラートースト
+5. models.DeleteItem(db, itemID) を呼び出す
+   - 取引履歴（transactions）が存在する場合はエラーを返す → 422
+   - 画像パスを収集してから item_images を含む DB レコードを CASCADE DELETE
+6. ハンドラが uploads/{item_id}/{filename} のファイルを削除
+7. uploads/{item_id}/ ディレクトリを削除
+8. 成功: HX-Redirect: /my-items + トースト
+```
+
+**制約：**
+- 取引履歴が1件以上存在するアイテムは削除不可
+- status が `'private'` 以外（`'market'`, `'deleted'`）は削除不可
 
 ---
 
@@ -225,6 +247,59 @@ WHERE status = 'market' AND market_at < NOW() - INTERVAL '90 days'
 - sysadminが0人の場合のみ作成（冪等）
 - department_id: NULL（部門なし）
 
+### 4.4 ユーザー削除
+
+**admin版（POST /admin/users/{user_id}/delete）：**
+- 対象ユーザーが自部門かつ `role = 'user'` であることを確認（それ以外は 403）
+- `models.DeleteUser` でユーザーを削除（所有アイテム・item_images も CASCADE）
+- ファイルシステムの画像ファイルも削除
+- リダイレクト: `/admin/users`
+
+**sysadmin版（POST /sysadmin/users/{user_id}/delete）：**
+- 対象ユーザーのロール制限なし
+- 同様に CASCADE 削除・ファイル削除
+- リダイレクト: `/sysadmin/departments`
+
+### 4.5 パスワードリセット（管理者による強制変更）
+
+**admin版（POST /admin/users/{user_id}/reset-password）：**
+- 対象ユーザーが自部門かつ `role = 'user'` であることを確認（それ以外は 403）
+- フォームフィールド: `new_password`（必須）
+- `models.UpdatePassword` で bcrypt ハッシュを更新
+- 現在パスワードの確認は不要（管理者権限による強制リセット）
+- リダイレクト: `/admin/users`
+
+**sysadmin版（POST /sysadmin/users/{user_id}/reset-password）：**
+- 対象ユーザーのロール制限なし
+- 同様に `models.UpdatePassword` で更新
+- リダイレクト: `/sysadmin/departments`
+
+### 4.6 ユーザー異動（部門変更）
+
+**admin版（POST /admin/users/{user_id}/transfer）：**
+- 対象ユーザーが自部門かつ `role = 'user'` であることを確認（それ以外は 403）
+- フォームフィールド: `department_id`（必須、現部門と異なること）
+- `models.TransferUser` でユーザーの `department_id` を更新
+- リダイレクト: `/admin/users`
+
+**sysadmin版（POST /sysadmin/users/{user_id}/transfer）：**
+- `role = 'sysadmin'` のユーザーへの異動は 403
+- 現部門と同じ `department_id` なら 422
+- `models.TransferUser` で更新
+- リダイレクト: `/sysadmin/departments`
+
+### 4.7 ロール昇格・降格（sysadmin専用）
+
+**昇格（POST /sysadmin/users/{user_id}/promote）：**
+- 対象ユーザーの `role = 'user'` であることを確認（それ以外は 422）
+- `models.PromoteToAdmin` でロールを `'admin'` に変更
+- リダイレクト: `/sysadmin/departments`
+
+**降格（POST /sysadmin/users/{user_id}/demote）：**
+- 対象ユーザーの `role = 'admin'` であることを確認（それ以外は 422）
+- `models.DemoteToUser` でロールを `'user'` に変更
+- リダイレクト: `/sysadmin/departments`
+
 ---
 
 ## 5. 部門管理
@@ -233,7 +308,7 @@ WHERE status = 'market' AND market_at < NOW() - INTERVAL '90 days'
 
 - `POST /sysadmin/departments`
 - バリデーション: name 必須（DB制約: UNIQUE）
-- DB制約違反（重複）時は500エラー（現在はエラーメッセージのみ）
+- DB制約違反（重複）時は PostgreSQL エラーコード `23505`（`pq.Error`）を検出し、422 + トースト「その部門名はすでに存在します」を返す（`handlers/admin.go: SysAdminCreateDepartment`）
 
 ---
 
@@ -268,3 +343,53 @@ if f.Status != "" {
 }
 // ... 以下同様
 ```
+
+---
+
+## 7. 取引履歴
+
+### 7.1 取引履歴一覧（GET /transactions）
+
+**対象：** user, admin
+
+**処理フロー：**
+```
+1. ログインユーザーの user.ID を取得
+2. models.ListTransactionsByUser(db, userID, limit, offset) で取引一覧取得
+   - from_user_id = userID（譲渡した取引）または to_user_id = userID（受け取った取引）
+3. HX-Request: true の場合は transactions_partial.html のみ返す
+4. それ以外は transactions.html（フルページ）を返す
+```
+
+**ページネーション：** 1ページ10件（perPage = 10）、TotalPages を渡す
+
+**テンプレートデータ：**
+```go
+map[string]any{
+    "User":         *models.User,
+    "Transactions": []models.Transaction,
+    "Page":         int,
+    "TotalPages":   int,
+}
+```
+
+---
+
+## 8. パスワード変更（自分のパスワード）
+
+### 8.1 パスワード変更フォーム（GET /profile/password）
+
+全ロールが利用可能。`password_change.html` を表示する。
+
+### 8.2 パスワード変更処理（POST /profile/password）
+
+**バリデーション（422 + トースト）：**
+1. `current_password`、`new_password`、`confirm_password` のいずれかが空
+2. `new_password != confirm_password`
+3. `current_password` が DB のハッシュと一致しない（`models.CheckPassword` で検証）
+
+**処理：**
+- `models.UpdatePassword(db, user.ID, newPass)` で bcrypt ハッシュを更新
+- 成功時: `HX-Redirect: /` + トースト（「パスワードを変更しました」）
+
+**注意：** 管理者によるパスワードリセット（§4.5）とは異なり、現在のパスワードによる本人確認を必須とする。

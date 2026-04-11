@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -65,12 +67,12 @@ func (e *Env) SysAdminCreateDepartment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Env) SysAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
-	deptID, _ := strconv.Atoi(r.FormValue("department_id"))
+	deptID, convErr := strconv.Atoi(r.FormValue("department_id"))
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 	displayName := r.FormValue("display_name")
 
-	if username == "" || password == "" || deptID == 0 {
+	if convErr != nil || username == "" || password == "" || deptID == 0 {
 		triggerToast(w, "すべての項目を入力してください")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
@@ -271,10 +273,24 @@ func (e *Env) AdminCreateItem(w http.ResponseWriter, r *http.Request) {
 
 	title := r.FormValue("title")
 	description := r.FormValue("description")
-	ownerID, _ := strconv.Atoi(r.FormValue("owner_id"))
+	ownerID, convErr := strconv.Atoi(r.FormValue("owner_id"))
 
-	if title == "" || ownerID == 0 {
+	if convErr != nil || ownerID == 0 || title == "" {
 		triggerToast(w, "タイトルと所有者は必須です")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	// 部門チェック: ownerが同じ部門に属しているか確認
+	owner, err := models.GetUserByID(e.DB, ownerID)
+	if err != nil || owner.DepartmentID == nil || *owner.DepartmentID != *currentUser.DepartmentID {
+		triggerToast(w, "同じ部門のユーザーのみを選択できます")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	if r.MultipartForm != nil && len(r.MultipartForm.File["images"]) > maxImages {
+		triggerToast(w, fmt.Sprintf("画像は最大%d枚までです", maxImages))
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
@@ -408,7 +424,9 @@ func (e *Env) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, p := range paths {
-		os.Remove(filepath.Join(uploadDir, p))
+		if err := os.Remove(filepath.Join(uploadDir, p)); err != nil && !os.IsNotExist(err) {
+			log.Printf("warn: failed to remove file %s: %v", p, err)
+		}
 	}
 	triggerToast(w, target.DisplayName+"を削除しました")
 	w.Header().Set("HX-Redirect", "/admin/users")
@@ -513,7 +531,9 @@ func (e *Env) SysAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, p := range paths {
-		os.Remove(filepath.Join(uploadDir, p))
+		if err := os.Remove(filepath.Join(uploadDir, p)); err != nil && !os.IsNotExist(err) {
+			log.Printf("warn: failed to remove file %s: %v", p, err)
+		}
 	}
 	triggerToast(w, target.DisplayName+"を削除しました")
 	w.Header().Set("HX-Redirect", "/sysadmin/departments")

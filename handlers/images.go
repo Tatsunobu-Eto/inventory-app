@@ -32,6 +32,15 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 		return err
 	}
 
+	var savedFiles []string
+	rollback := func() {
+		for _, f := range savedFiles {
+			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+				log.Printf("warn: rollback failed to remove %s: %v", f, err)
+			}
+		}
+	}
+
 	for _, fh := range files {
 		ext := strings.ToLower(filepath.Ext(fh.Filename))
 		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".webp" {
@@ -40,6 +49,7 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 
 		src, err := fh.Open()
 		if err != nil {
+			rollback()
 			return err
 		}
 
@@ -51,6 +61,7 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 		dst, err := os.Create(dstPath)
 		if err != nil {
 			src.Close()
+			rollback()
 			return err
 		}
 
@@ -58,11 +69,16 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 		src.Close()
 		dst.Close()
 		if err != nil {
+			os.Remove(dstPath)
+			rollback()
 			return err
 		}
 
+		savedFiles = append(savedFiles, dstPath)
 		log.Printf("Uploaded image for item %d: %s\n", itemID, dstPath)
+
 		if _, err := models.CreateItemImage(e.DB, itemID, relPath); err != nil {
+			rollback()
 			return err
 		}
 	}

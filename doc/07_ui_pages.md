@@ -14,6 +14,9 @@
 | 消耗品登録（管理者） | `/admin/items/new` | `admin_item_form.html` | admin | 代理アイテム登録（所有者を選択） |
 | 部門アイテム一覧 | `/admin/items` | `admin_dept_items.html` | admin | 部門内全アイテム検索・閲覧 |
 | 部門管理 | `/sysadmin/departments` | `sysadmin_departments.html` | sysadmin | 部門作成・管理者アカウント作成 |
+| 取引履歴 | `/transactions` | `transactions.html` + `transactions_partial.html` | user, admin | 自分が関与した取引の一覧・ページネーション |
+| パスワード変更 | `/profile/password` | `password_change.html` | 全ロール | 現在パスワード確認付きパスワード変更フォーム |
+| 全アイテム一覧（管理者） | `/sysadmin/items` | `sysadmin_all_items.html` | sysadmin | 全部門・全アイテムの検索・閲覧 |
 
 ---
 
@@ -46,12 +49,15 @@
 | ダッシュボード | 全ロール |
 | マーケット | user, admin |
 | マイアイテム | user, admin |
+| 取引履歴 | user, admin |
 | ユーザー管理 | admin のみ |
 | 部門アイテム一覧 | admin のみ |
 | 消耗品登録（管理者） | admin のみ |
 | 部門管理 | sysadmin のみ |
+| 全アイテム一覧 | sysadmin のみ |
+| パスワード変更 | 全ロール（サイドバー下部） |
 
-サイドバー下部にはログインユーザーの `DisplayName` とログアウトリンクを表示。
+サイドバー下部にはログインユーザーの `DisplayName`、パスワード変更リンク、ログアウトリンクを表示。
 
 ---
 
@@ -193,10 +199,25 @@ map[string]any{
 }
 ```
 
+**テンプレートデータ：**
+```go
+map[string]any{
+    "User":        *models.User,
+    "Users":       []models.User,
+    "Department":  models.Department,
+    "Departments": []models.Department,  // 異動先部門選択用
+}
+```
+
 **表示内容：**
 - 部門名ヘッダー
 - ユーザー一覧テーブル（表示名、ユーザー名、ロール）
 - ユーザー作成フォーム（ユーザー名・パスワード・表示名）
+
+**ユーザーアクションボタン（ユーザー行ごと）：**
+- 「パスワードリセット」ボタン（`hx-post="/admin/users/{id}/reset-password"`、`new_password` フィールド付きフォーム）
+- 「削除」ボタン（`hx-post="/admin/users/{id}/delete"`、`hx-confirm` 付き）
+- 「異動」ボタン（`hx-post="/admin/users/{id}/transfer"`、部門選択 `<select name="department_id">` フォーム）
 
 ---
 
@@ -244,15 +265,80 @@ map[string]any{
 **テンプレートデータ：**
 ```go
 map[string]any{
-    "User":        *models.User,
-    "Departments": []models.Department,
+    "User":  *models.User,
+    "Depts": []deptWithUsers,  // Department + Users []models.User の構造体スライス
 }
 ```
 
 **表示内容：**
-- 部門一覧テーブル
+- 部門一覧（折りたたみ式カード）
 - 部門作成フォーム（部門名のみ）
 - 部門管理者作成フォーム（所属部門選択・ユーザー名・パスワード・表示名）
+
+**ユーザーアクションボタン（部門内ユーザー行ごと）：**
+- 「管理者に昇格」ボタン（`role = 'user'` のみ表示、`hx-post="/sysadmin/users/{id}/promote"`）
+- 「一般ユーザーに降格」ボタン（`role = 'admin'` のみ表示、`hx-post="/sysadmin/users/{id}/demote"`）
+- 「パスワードリセット」ボタン（`hx-post="/sysadmin/users/{id}/reset-password"`）
+- 「削除」ボタン（`hx-post="/sysadmin/users/{id}/delete"`、`hx-confirm` 付き）
+- 「異動」ボタン（`hx-post="/sysadmin/users/{id}/transfer"`、部門選択フォーム）
+
+---
+
+### transactions.html + transactions_partial.html
+
+**テンプレートデータ：**
+```go
+map[string]any{
+    "User":         *models.User,
+    "Transactions": []models.Transaction,
+    "Page":         int,
+    "TotalPages":   int,
+}
+```
+
+**表示内容：**
+- 取引一覧テーブル（取引日時、アイテム名、譲渡元ユーザー名、譲渡先ユーザー名）
+- ページネーション（`hx-get="/transactions?page=..."`, `hx-target="#transaction-list"`, `hx-push-url="true"`）
+
+**HTMX部分更新：**
+- `HX-Request: true` の場合は `transactions_partial.html` のみ返す
+
+---
+
+### password_change.html
+
+**テンプレートデータ：** `map[string]any{"User": *models.User}`
+
+**フィールド：**
+- 現在のパスワード（`current_password`）
+- 新しいパスワード（`new_password`）
+- 新しいパスワード（確認）（`confirm_password`）
+
+**送信：** `hx-post="/profile/password"` + HTMX フォーム
+
+---
+
+### sysadmin_all_items.html
+
+**テンプレートデータ：**
+```go
+map[string]any{
+    "User":       *models.User,
+    "Items":      []models.Item,
+    "ImageMap":   map[int][]models.ItemImage,
+    "Query":      string,
+    "Status":     string,
+    "OwnerID":    int,
+    "AllUsers":   []models.User,
+    "Page":       int,
+    "TotalPages": int,
+}
+```
+
+**表示内容：**
+- 検索フォーム（キーワード `q`、ステータス選択 `status`、所有者選択 `owner_id`）
+- 全部門のアイテム一覧グリッド（アイテム名、所有者、ステータス）
+- ページネーション
 
 ---
 
