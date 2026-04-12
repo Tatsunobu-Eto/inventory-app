@@ -1,0 +1,29 @@
+{{define "content"}}
+<div class="max-w-lg mx-auto mt-16">
+  <div class="bg-white rounded-2xl shadow-md p-10 text-center">
+    <!-- 成功アイコン -->
+    <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+      </svg>
+    </div>
+
+    <h1 class="text-2xl font-bold text-slate-800 mb-2">応募が成立しました！</h1>
+    <p class="text-slate-500 mb-6">
+      <span class="font-semibold text-slate-700">{{.ItemTitle}}</span> の取引が完了しました。
+    </p>
+
+    <!-- 連絡先案内 -->
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-left">
+      <p class="text-sm text-amber-800 font-semibold mb-1">次のステップ</p>
+      <p class="text-sm text-amber-700">
+        出品者（<span class="font-semibold">{{.SellerName}}</span>）と直接ご連絡のうえ、受け取り日時・場所をご確認ください。
+      </p>
+    </div>
+
+    <a href="/my-items" class="inline-block bg-indigo-600 text-white px-8 py-3 rounded-xl font-semibold hover:bg-indigo-700 transition-colors">
+      マイアイテムを確認する
+    </a>
+  </div>
+</div>
+{{end}}

@@ -85,7 +85,7 @@ func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "item_list_partial.html", data)
 		return
 	}
-	e.render(w, "market.html", data)
+	e.render(w, r, "market.html", data)
 }
 
 // MyItems はログインユーザーが所有するアイテム一覧を表示する。ページネーション対応。
@@ -141,13 +141,13 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "my_items_partial.html", data)
 		return
 	}
-	e.render(w, "my_items.html", data)
+	e.render(w, r, "my_items.html", data)
 }
 
 // CreateItemForm はアイテム登録フォームを表示する。
 func (e *Env) CreateItemForm(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	e.render(w, "item_form.html", map[string]any{"User": user})
+	e.render(w, r, "item_form.html", map[string]any{"User": user})
 }
 
 // CreateItemPost はアイテム登録フォームの送信を処理し、アイテムと画像をDBに保存する。
@@ -259,9 +259,31 @@ func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	triggerToast(w, "応募が完了しました！")
-	w.Header().Set("HX-Redirect", "/my-items")
+	w.Header().Set("HX-Redirect", fmt.Sprintf("/apply/success?item_id=%d", itemID))
 	w.WriteHeader(http.StatusOK)
+}
+
+// ApplySuccess は応募成功後の確認ページを表示する。
+// 取引成立したアイテムの情報と「出品者と直接連絡してください」メッセージを表示する。
+func (e *Env) ApplySuccess(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	itemID, err := strconv.Atoi(r.URL.Query().Get("item_id"))
+	if err != nil || itemID == 0 {
+		http.Redirect(w, r, "/my-items", http.StatusSeeOther)
+		return
+	}
+
+	tx, err := models.GetLatestTransactionForItem(e.DB, itemID)
+	if err != nil {
+		http.Redirect(w, r, "/my-items", http.StatusSeeOther)
+		return
+	}
+
+	e.render(w, r, "apply_success.html", map[string]any{
+		"User":       user,
+		"ItemTitle":  tx.ItemTitle,
+		"SellerName": tx.FromUserName,
+	})
 }
 
 // ItemDetail はアイテムの詳細画面を表示する。
@@ -321,7 +343,7 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		"BackText": backText,
 	}
 
-	e.render(w, "item_detail.html", data)
+	e.render(w, r, "item_detail.html", data)
 }
 
 // UpdateItemPost はアイテムの説明文と画像を更新する。アイテムの所有者のみ操作可能。
@@ -407,6 +429,9 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ページを開いた時点で自分が出品者として関わる未読取引を全て既読にする
+	_ = models.MarkTransactionsReadForUser(e.DB, user.ID)
+
 	data := map[string]any{
 		"User":         user,
 		"Transactions": txs,
@@ -418,7 +443,7 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "transactions_partial.html", data)
 		return
 	}
-	e.render(w, "transactions.html", data)
+	e.render(w, r, "transactions.html", data)
 }
 
 // DeleteItem はアイテムをDBから削除し、紐づく画像ファイルもディスクから削除する。

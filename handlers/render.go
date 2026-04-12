@@ -68,6 +68,7 @@ func NewEnv(db *sql.DB, store sessions.Store, tmplFS fs.FS) *Env {
 		"item_detail.html",
 		"transactions.html",
 		"password_change.html",
+		"apply_success.html",
 	}
 	for _, page := range pages {
 		tmpls[page] = template.Must(
@@ -96,7 +97,16 @@ func NewEnv(db *sql.DB, store sessions.Store, tmplFS fs.FS) *Env {
 
 // render はフルページHTMLをレスポンスに書き出す。
 // 通常は layout.html をエントリポイントとしてレンダリングし、ログインページのみ単独で描画する。
-func (e *Env) render(w http.ResponseWriter, name string, data map[string]any) {
+// data に "User" が含まれる場合、未読取引件数を自動的に "UnreadTxCount" として追加する。
+func (e *Env) render(w http.ResponseWriter, r *http.Request, name string, data map[string]any) {
+	if data == nil {
+		data = map[string]any{}
+	}
+	if u, ok := data["User"].(*models.User); ok && u != nil {
+		count, _ := models.CountUnreadTransactionsForUser(e.DB, u.ID)
+		data["UnreadTxCount"] = count
+	}
+
 	t, ok := e.tmpls[name]
 	if !ok {
 		http.Error(w, fmt.Sprintf("template %q not found", name), http.StatusInternalServerError)

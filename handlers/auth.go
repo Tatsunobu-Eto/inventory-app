@@ -9,7 +9,7 @@ import (
 
 // LoginPage はログイン画面を表示する。
 func (e *Env) LoginPage(w http.ResponseWriter, r *http.Request) {
-	e.render(w, "login.html", nil)
+	e.render(w, r, "login.html", nil)
 }
 
 // LoginPost はログインフォームの送信を処理し、認証に成功したらセッションを作成してトップページへリダイレクトする。
@@ -27,7 +27,7 @@ func (e *Env) LoginPost(w http.ResponseWriter, r *http.Request) {
 	passwordOK := models.CheckPassword(hashToCheck, password)
 	if err != nil || !passwordOK {
 		triggerToast(w, "ユーザー名またはパスワードが正しくありません")
-		e.render(w, "login.html", map[string]any{"Error": "ユーザー名またはパスワードが正しくありません"})
+		e.render(w, r, "login.html", map[string]any{"Error": "ユーザー名またはパスワードが正しくありません"})
 		return
 	}
 
@@ -49,13 +49,13 @@ func (e *Env) Logout(w http.ResponseWriter, r *http.Request) {
 // Dashboard はダッシュボード画面を表示する。
 func (e *Env) Dashboard(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	e.render(w, "dashboard.html", map[string]any{"User": user})
+	e.render(w, r, "dashboard.html", map[string]any{"User": user})
 }
 
 // PasswordChangePage はパスワード変更画面を表示する。
 func (e *Env) PasswordChangePage(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	e.render(w, "password_change.html", map[string]any{"User": user})
+	e.render(w, r, "password_change.html", map[string]any{"User": user})
 }
 
 // PasswordChangePost はパスワード変更フォームの送信を処理する。

@@ -121,6 +121,7 @@ func main() {
 
 		// 取引履歴
 		r.Get("/transactions", env.Transactions)
+		r.Get("/apply/success", env.ApplySuccess)
 
 		// パスワード変更
 		r.Get("/profile/password", env.PasswordChangePage)

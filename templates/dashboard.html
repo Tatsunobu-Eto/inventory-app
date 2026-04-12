@@ -31,7 +31,12 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
       </div>
-      <div class="text-base font-semibold text-slate-800 mb-1">取引履歴</div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-base font-semibold text-slate-800">取引履歴</span>
+        {{if .UnreadTxCount}}
+        <span class="bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-tight">{{.UnreadTxCount}}</span>
+        {{end}}
+      </div>
       <div class="text-xs text-slate-400">アイテムの取引履歴を確認</div>
     </a>
     {{end}}

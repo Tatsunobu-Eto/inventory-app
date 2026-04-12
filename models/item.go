@@ -238,7 +238,7 @@ func ApplyForItem(db *sql.DB, itemID, applicantID int) (bool, error) {
 	}
 
 	_, err = tx.Exec(
-		"INSERT INTO transactions (item_id, from_user_id, to_user_id) VALUES ($1, $2, $3)",
+		"INSERT INTO transactions (item_id, from_user_id, to_user_id, from_user_read) VALUES ($1, $2, $3, false)",
 		itemID, ownerID, applicantID,
 	)
 	if err != nil {

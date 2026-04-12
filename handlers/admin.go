@@ -40,7 +40,7 @@ func (e *Env) SysAdminDepartments(w http.ResponseWriter, r *http.Request) {
 		}
 		depts = append(depts, deptWithUsers{Department: d, Users: users})
 	}
-	e.render(w, "sysadmin_departments.html", map[string]any{"User": user, "Depts": depts})
+	e.render(w, r, "sysadmin_departments.html", map[string]any{"User": user, "Depts": depts})
 }
 
 // SysAdminCreateDepartment は新しい部門を作成する。部門名が既に存在する場合はエラーを返す。
@@ -200,7 +200,7 @@ func (e *Env) SysAdminAllItems(w http.ResponseWriter, r *http.Request) {
 	}
 	imageMap := collectImages(e, items)
 
-	e.render(w, "sysadmin_all_items.html", map[string]any{
+	e.render(w, r, "sysadmin_all_items.html", map[string]any{
 		"User":       user,
 		"Items":      items,
 		"ImageMap":   imageMap,
@@ -235,7 +235,7 @@ func (e *Env) AdminUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	e.render(w, "admin_users.html", map[string]any{
+	e.render(w, r, "admin_users.html", map[string]any{
 		"User":        user,
 		"Users":       users,
 		"Department":  dept,
@@ -335,7 +335,7 @@ func (e *Env) AdminCreateItemForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.render(w, "admin_item_form.html", map[string]any{"User": user, "Users": users})
+	e.render(w, r, "admin_item_form.html", map[string]any{"User": user, "Users": users})
 }
 
 // AdminDeptItems は自分の部門のアイテム一覧を表示する。ステータス・ユーザー・キーワードで絞り込み可能。
@@ -393,7 +393,7 @@ func (e *Env) AdminDeptItems(w http.ResponseWriter, r *http.Request) {
 	}
 	imageMap := collectImages(e, items)
 
-	e.render(w, "admin_dept_items.html", map[string]any{
+	e.render(w, r, "admin_dept_items.html", map[string]any{
 		"User":       user,
 		"Items":      items,
 		"ImageMap":   imageMap,
