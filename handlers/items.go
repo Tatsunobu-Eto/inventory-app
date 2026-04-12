@@ -228,23 +228,12 @@ func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 }
 
 // ApplyForItem はマーケット出品中のアイテムへの応募を処理する。
-// 同じ部門のメンバーのみ応募可能。競合する同時応募はDBのトランザクションで制御される。
+// 部門に関係なく全ユーザーが応募可能。競合する同時応募はDBのトランザクションで制御される。
 func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
 	if convErr != nil || itemID == 0 {
 		http.Error(w, "無効なアイテムIDです", http.StatusBadRequest)
-		return
-	}
-
-	// 部門チェック: アイテムが自分の部門に属しているか確認
-	item, err := models.GetItem(e.DB, itemID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID {
-		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
 
@@ -318,8 +307,10 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 部門チェック: sysadmin以外は自部門のアイテムのみアクセス可
-	if user.Role != "sysadmin" && (user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
+	// 部門チェック: sysadmin以外は自部門のアイテムのみアクセス可（マーケット出品中は全部門から閲覧可）
+	isMarketItem := item.Status == "market"
+	if user.Role != "sysadmin" && !isMarketItem &&
+		(user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
 		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
