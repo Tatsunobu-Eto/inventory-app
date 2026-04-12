@@ -1,0 +1,43 @@
+# ---- デバッグビルドステージ ----
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+COPY vendor/ vendor/
+COPY . .
+
+# デバッグシンボルあり・最適化なし・インライン展開なしでビルド
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -mod=vendor \
+    -gcflags="all=-N -l" \
+    -o inventory \
+    .
+
+# dlv を vendor からビルド（ネットワーク不要）
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -mod=vendor \
+    -o /usr/local/bin/dlv \
+    github.com/go-delve/delve/cmd/dlv
+
+# ---- デバッグ実行ステージ ----
+FROM golang:1.23-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/inventory .
+COPY --from=builder /usr/local/bin/dlv /usr/local/bin/dlv
+
+RUN mkdir -p uploads
+
+# 8080: アプリ HTTP ポート
+# 40000: Delve デバッガポート
+EXPOSE 8080 40000
+
+CMD ["dlv", \
+     "exec", "./inventory", \
+     "--headless", \
+     "--listen=:40000", \
+     "--api-version=2", \
+     "--accept-multiclient", \
+     "--only-same-user=false"]
