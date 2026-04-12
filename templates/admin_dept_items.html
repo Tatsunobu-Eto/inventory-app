@@ -18,7 +18,7 @@
       <option value="" {{if eq .Status ""}}selected{{end}}>全ステータス</option>
       <option value="private" {{if eq .Status "private"}}selected{{end}}>非公開</option>
       <option value="market" {{if eq .Status "market"}}selected{{end}}>出品中</option>
-      <option value="deleted" {{if eq .Status "deleted"}}selected{{end}}>期限切れ</option>
+      <option value="applying" {{if eq .Status "applying"}}selected{{end}}>承認待ち</option>
     </select>
     <select name="owner_id"
             class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white">
@@ -39,8 +39,7 @@
   <div class="space-y-2">
     {{$imageMap := .ImageMap}}
     {{range .Items}}
-    <a href="/items/{{.ID}}?from=admin" class="bg-white border rounded-xl p-4 flex items-start gap-4 hover:shadow-sm transition-all block
-              {{if eq .Status "deleted"}}border-rose-300 bg-rose-50{{else}}border-slate-200 hover:border-indigo-200{{end}}">
+    <a href="/items/{{.ID}}?from=admin" class="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-4 hover:shadow-sm hover:border-indigo-200 transition-all block">
       {{$imgs := images $imageMap .ID}}
       {{if $imgs}}
       <img src="/uploads/{{(index $imgs 0).FilePath}}" alt="" class="w-16 h-16 object-cover rounded-lg border border-slate-100 shrink-0">
@@ -63,12 +62,9 @@
           <span class="inline-flex items-center gap-1 mt-2 text-xs bg-sky-100 text-sky-700 rounded-full px-2.5 py-0.5">
             <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>出品中
           </span>
-        {{else if eq .Status "deleted"}}
-          <span class="inline-flex items-center gap-1 mt-2 text-xs bg-rose-100 text-rose-700 rounded-full px-2.5 py-0.5 font-semibold">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            期限切れのため破棄してください
+        {{else if eq .Status "applying"}}
+          <span class="inline-flex items-center gap-1 mt-2 text-xs bg-amber-100 text-amber-700 rounded-full px-2.5 py-0.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>承認待ち
           </span>
         {{end}}
       </div>

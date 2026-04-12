@@ -8,9 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
-	"time"
 	_ "time/tzdata" // タイムゾーンデータをバイナリに埋め込み（オフライン環境対応）
 
 	"inventory-app/handlers"
@@ -37,7 +34,7 @@ var staticFS embed.FS
 var migrationsFS embed.FS
 
 // main はアプリケーションのエントリポイント。
-// .env 読み込み → DB接続 → マイグレーション → 初期ユーザー作成 → バックグラウンドジョブ起動 → HTTPサーバー起動 の順で処理する。
+// .env 読み込み → DB接続 → マイグレーション → 初期ユーザー作成 → HTTPサーバー起動 の順で処理する。
 func main() {
 	_ = godotenv.Load()
 
@@ -61,22 +58,6 @@ func main() {
 
 	// sysadmin が1人もいない場合は初期ユーザーを作成する
 	seedSysadmin(db)
-
-	// 90日期限切れのマーケット出品を自動削除するバックグラウンドジョブ（毎時実行）
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for {
-			ids, err := models.ExpireMarketItems(db)
-			if err != nil {
-				log.Printf("expire job error: %v", err)
-			} else if len(ids) > 0 {
-				log.Printf("expired %d market items", len(ids))
-				cleanupItemFiles(db, ids)
-			}
-			<-ticker.C
-		}
-	}()
 
 	sessionKey := os.Getenv("SESSION_KEY")
 	if sessionKey == "" {
@@ -119,9 +100,11 @@ func main() {
 		r.Post("/items/withdraw", env.WithdrawFromMarket)
 		r.Post("/items/apply", env.ApplyForItem)
 
-		// 取引履歴
+		// 取引履歴・応募承認
 		r.Get("/transactions", env.Transactions)
 		r.Get("/apply/success", env.ApplySuccess)
+		r.Post("/transactions/{transaction_id}/approve", env.ApproveTransaction)
+		r.Post("/transactions/{transaction_id}/reject", env.RejectTransaction)
 
 		// パスワード変更
 		r.Get("/profile/password", env.PasswordChangePage)
@@ -192,28 +175,6 @@ func runMigrations(db *sql.DB) {
 		log.Fatalf("migration up: %v", err)
 	}
 	log.Println("Migrations applied successfully")
-}
-
-// cleanupItemFiles は指定アイテムIDに紐づく画像ファイルをディスクから削除する。
-// アイテムの期限切れ・削除後に呼び出し、孤立したファイルを残さないようにする。
-func cleanupItemFiles(db *sql.DB, itemIDs []int) {
-	imgMap, err := models.ListItemImagesByItems(db, itemIDs)
-	if err != nil {
-		log.Printf("cleanup: failed to list images: %v", err)
-		return
-	}
-	for itemID, imgs := range imgMap {
-		for _, img := range imgs {
-			path := filepath.Join("uploads", img.FilePath)
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				log.Printf("cleanup: remove %s: %v", path, err)
-			}
-		}
-		dir := filepath.Join("uploads", strconv.Itoa(itemID))
-		if err := os.Remove(dir); err != nil && !os.IsNotExist(err) {
-			log.Printf("cleanup: remove dir %s: %v", dir, err)
-		}
-	}
 }
 
 // seedSysadmin はシステム管理者が1人もいない場合に、環境変数から初期 sysadmin を作成する。

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 
 	mw "inventory-app/middleware"
 	"inventory-app/models"
+
+	"errors"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -237,6 +240,11 @@ func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := models.ApplyForItem(e.DB, itemID, user.ID)
 	if err != nil {
+		if errors.Is(err, models.ErrSelfApplication) {
+			w.WriteHeader(http.StatusBadRequest)
+			triggerToast(w, "自分のアイテムには応募できません")
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -321,13 +329,17 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isAdmin := user.Role == "admin" && user.DepartmentID != nil && *user.DepartmentID == item.DepartmentID
+	isSysAdmin := user.Role == "sysadmin"
+
 	data := map[string]any{
-		"User":     user,
-		"Item":     item,
-		"Images":   images,
-		"IsOwner":  isOwner,
-		"BackURL":  backURL,
-		"BackText": backText,
+		"User":      user,
+		"Item":      item,
+		"Images":    images,
+		"IsOwner":   isOwner,
+		"IsAdmin":   isAdmin || isSysAdmin,
+		"BackURL":   backURL,
+		"BackText":  backText,
 	}
 
 	e.render(w, r, "item_detail.html", data)
@@ -350,6 +362,11 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 
 	if user.ID != item.OwnerID {
 		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+
+	if item.Status == "applying" {
+		http.Error(w, "承認待ち中はアイテムを編集できません", http.StatusForbidden)
 		return
 	}
 
@@ -434,7 +451,7 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteItem はアイテムをDBから削除し、紐づく画像ファイルもディスクから削除する。
-// 所有者本人かつ非公開状態のアイテムのみ削除可能。取引履歴があるアイテムは削除不可。
+// 所有者本人（private のみ）・同部門の admin・sysadmin が削除可能。
 func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -449,11 +466,16 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.ID != item.OwnerID {
+	isOwner := user.ID == item.OwnerID
+	isAdmin := user.Role == "admin" && user.DepartmentID != nil && *user.DepartmentID == item.DepartmentID
+	isSysAdmin := user.Role == "sysadmin"
+
+	if !isOwner && !isAdmin && !isSysAdmin {
 		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
 
+	// 所有者・admin・sysadmin いずれも private のみ削除可
 	if item.Status != "private" {
 		triggerToast(w, "非公開状態のアイテムのみ削除できます")
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -481,6 +503,54 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ApproveTransaction は応募を承認する。出品者本人のみ操作可能。
+// 承認後、所有権が応募者に移り、応募レコードは削除される。
+func (e *Env) ApproveTransaction(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	txID, err := strconv.Atoi(chi.URLParam(r, "transaction_id"))
+	if err != nil {
+		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := models.ApproveApplication(e.DB, txID, user.ID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "権限がないか、対象の応募が見つかりません", http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "応募を承認しました")
+	w.Header().Set("HX-Redirect", "/transactions")
+	w.WriteHeader(http.StatusOK)
+}
+
+// RejectTransaction は応募を拒否する。出品者本人のみ操作可能。
+// 拒否後、アイテムはマーケットに戻り、応募レコードは削除される。
+func (e *Env) RejectTransaction(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	txID, err := strconv.Atoi(chi.URLParam(r, "transaction_id"))
+	if err != nil {
+		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := models.RejectApplication(e.DB, txID, user.ID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "権限がないか、対象の応募が見つかりません", http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "応募を拒否しました")
+	w.Header().Set("HX-Redirect", "/transactions")
+	w.WriteHeader(http.StatusOK)
+}
+
 // DeleteItemImage はアイテムの画像1枚をDBとディスクから削除する。アイテムの所有者のみ操作可能。
 func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
@@ -504,6 +574,11 @@ func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 
 	if user.ID != item.OwnerID {
 		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+
+	if item.Status == "applying" {
+		http.Error(w, "承認待ち中はアイテムを編集できません", http.StatusForbidden)
 		return
 	}
 

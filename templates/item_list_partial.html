@@ -25,7 +25,8 @@
         <div class="text-xs text-slate-400 mt-1 truncate">{{if .OwnerDeptName}}{{.OwnerDeptName}} {{end}}{{.OwnerName}}</div>
       </div>
     </a>
-    <!-- Apply button -->
+    <!-- Apply button (自分の出品アイテムには表示しない) -->
+    {{if ne $.User.ID .OwnerID}}
     <div class="px-2.5 pb-2.5">
       <button hx-post="/items/apply"
               hx-vals='{"item_id": "{{.ID}}"}'
@@ -35,6 +36,7 @@
         応募する
       </button>
     </div>
+    {{end}}
   </div>
   {{else}}
   <div class="col-span-full flex flex-col items-center py-16 text-slate-400">

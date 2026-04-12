@@ -13,20 +13,16 @@
     <div class="flex-1 min-w-0">
       <div class="text-sm font-semibold text-slate-800">{{.ItemTitle}}</div>
       <div class="text-xs text-slate-500 mt-1">
-        <span class="text-emerald-600 font-medium">受け取り</span>
-        &nbsp;·&nbsp;{{if .FromUserDeptName}}{{.FromUserDeptName}} {{end}}{{.FromUserName}} から
+        <span class="text-emerald-600 font-medium">申請中</span>
+        &nbsp;·&nbsp;{{if .FromUserDeptName}}{{.FromUserDeptName}} {{end}}{{.FromUserName}} 
       </div>
       <div class="text-xs text-slate-400 mt-1">{{.CreatedAt.Format "2006-01-02 15:04"}}</div>
     </div>
-    <span class="shrink-0 text-xs bg-emerald-100 text-emerald-700 rounded-full px-2.5 py-0.5 font-medium">受け取り</span>
+    <span class="shrink-0 text-xs bg-emerald-100 text-emerald-700 rounded-full px-2.5 py-0.5 font-medium">申請中</span>
   </div>
   {{else}}
-  <!-- 渡した取引 -->
-  {{if .FromUserRead}}
-  <div class="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-4">
-  {{else}}
-  <div class="bg-amber-50 border border-amber-400 rounded-xl p-4 flex items-start gap-4">
-  {{end}}
+  <!-- 応募待ち・渡した取引（出品者側） -->
+  <div class="{{if not .FromUserRead}}bg-amber-50 border border-amber-400{{else}}bg-white border border-slate-200{{end}} rounded-xl p-4 flex items-start gap-4">
     <div class="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center shrink-0">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
@@ -35,15 +31,38 @@
     <div class="flex-1 min-w-0">
       <div class="text-sm font-semibold text-slate-800">{{.ItemTitle}}</div>
       <div class="text-xs text-slate-500 mt-1">
-        <span class="text-sky-600 font-medium">譲渡</span>
-        &nbsp;·&nbsp;{{if .ToUserDeptName}}{{.ToUserDeptName}} {{end}}{{.ToUserName}} へ
+        <span class="text-sky-600 font-medium">応募</span>
+        &nbsp;·&nbsp;{{if .ToUserDeptName}}{{.ToUserDeptName}} {{end}}{{.ToUserName}} から
       </div>
       <div class="text-xs text-slate-400 mt-1">{{.CreatedAt.Format "2006-01-02 15:04"}}</div>
+      {{if eq .ItemStatus "applying"}}
+      <!-- 承認待ちの応募：承認・拒否ボタンを表示 -->
+      <div class="flex gap-2 mt-3">
+        <button hx-post="/transactions/{{.ID}}/approve"
+                hx-confirm="この応募を承認しますか？アイテムが応募者に譲渡されます。"
+                hx-swap="none"
+                class="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+          承認
+        </button>
+        <button hx-post="/transactions/{{.ID}}/reject"
+                hx-confirm="この応募を拒否しますか？アイテムはマーケットに戻ります。"
+                hx-swap="none"
+                class="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-medium rounded-lg transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          拒否
+        </button>
+      </div>
+      {{end}}
     </div>
     {{if not .FromUserRead}}
     <span class="shrink-0 text-xs bg-amber-400 text-white rounded-full px-2.5 py-0.5 font-bold">NEW</span>
     {{end}}
-    <span class="shrink-0 text-xs bg-sky-100 text-sky-700 rounded-full px-2.5 py-0.5 font-medium">譲渡</span>
+    <span class="shrink-0 text-xs bg-sky-100 text-sky-700 rounded-full px-2.5 py-0.5 font-medium">応募</span>
   </div>
   {{end}}
   {{else}}

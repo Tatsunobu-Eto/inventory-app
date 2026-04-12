@@ -2,24 +2,26 @@ package models
 
 import (
 	"database/sql"
-	"fmt"
+	"errors"
 	"strconv"
 	"time"
 )
 
+// ErrSelfApplication は自分が出品したアイテムに応募しようとした場合のエラー。
+var ErrSelfApplication = errors.New("自分のアイテムには応募できません")
+
 // Item は消耗品1件を表す。
-// Status は "private"（非公開）/ "market"（マーケット出品中）/ "deleted"（削除済み）の3種類。
+// Status は "private"（非公開）/ "market"（マーケット出品中）/ "applying"（承認待ち）の3種類。
 // OwnerName・DepartmentName はSQLのJOINで取得した表示用フィールド。
 type Item struct {
-	ID           int        `json:"id"`
-	DepartmentID int        `json:"department_id"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	OwnerID      int        `json:"owner_id"`
-	CreatedBy    int        `json:"created_by"`
-	Status       string     `json:"status"` // private, market, deleted
-	MarketAt     *time.Time `json:"market_at"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID           int       `json:"id"`
+	DepartmentID int       `json:"department_id"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	OwnerID      int       `json:"owner_id"`
+	CreatedBy    int       `json:"created_by"`
+	Status       string    `json:"status"` // private, market, applying
+	CreatedAt    time.Time `json:"created_at"`
 	// JOINで取得する表示用フィールド
 	OwnerName      string `json:"owner_name"`
 	OwnerDeptName  string `json:"owner_dept_name"`
@@ -41,7 +43,7 @@ type ItemFilter struct {
 // WHERE句をフィルタの内容に応じて動的に組み立てる。
 func ListItems(db *sql.DB, f ItemFilter) ([]Item, error) {
 	q := `SELECT i.id, i.department_id, i.title, i.description, i.owner_id, i.created_by,
-	             i.status, i.market_at, i.created_at, u.display_name, COALESCE(du.name, ''), d.name
+	             i.status, i.created_at, u.display_name, COALESCE(du.name, ''), d.name
 	      FROM items i
 	      JOIN users u ON u.id = i.owner_id
 	      LEFT JOIN departments du ON du.id = u.department_id
@@ -104,7 +106,7 @@ func ListItems(db *sql.DB, f ItemFilter) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		if err := rows.Scan(&it.ID, &it.DepartmentID, &it.Title, &it.Description,
-			&it.OwnerID, &it.CreatedBy, &it.Status, &it.MarketAt, &it.CreatedAt,
+			&it.OwnerID, &it.CreatedBy, &it.Status, &it.CreatedAt,
 			&it.OwnerName, &it.OwnerDeptName, &it.DepartmentName); err != nil {
 			return nil, err
 		}
@@ -161,11 +163,11 @@ func GetItem(db *sql.DB, id int) (Item, error) {
 	var it Item
 	err := db.QueryRow(
 		`SELECT i.id, i.department_id, i.title, i.description, i.owner_id, i.created_by,
-		        i.status, i.market_at, i.created_at, u.display_name
+		        i.status, i.created_at, u.display_name
 		 FROM items i JOIN users u ON u.id = i.owner_id
 		 WHERE i.id = $1`, id,
 	).Scan(&it.ID, &it.DepartmentID, &it.Title, &it.Description,
-		&it.OwnerID, &it.CreatedBy, &it.Status, &it.MarketAt, &it.CreatedAt, &it.OwnerName)
+		&it.OwnerID, &it.CreatedBy, &it.Status, &it.CreatedAt, &it.OwnerName)
 	return it, err
 }
 
@@ -176,10 +178,10 @@ func CreateItem(db *sql.DB, departmentID int, title, description string, ownerID
 	err := db.QueryRow(
 		`INSERT INTO items (department_id, title, description, owner_id, created_by)
 		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, department_id, title, description, owner_id, created_by, status, market_at, created_at`,
+		 RETURNING id, department_id, title, description, owner_id, created_by, status, created_at`,
 		departmentID, title, description, ownerID, createdBy,
 	).Scan(&it.ID, &it.DepartmentID, &it.Title, &it.Description,
-		&it.OwnerID, &it.CreatedBy, &it.Status, &it.MarketAt, &it.CreatedAt)
+		&it.OwnerID, &it.CreatedBy, &it.Status, &it.CreatedAt)
 	return it, err
 }
 
@@ -193,7 +195,7 @@ func UpdateItemDescription(db *sql.DB, itemID int, description string) error {
 // 所有者本人かつ現在 "private" のアイテムのみ出品できる。
 func PutItemOnMarket(db *sql.DB, itemID, ownerID int) error {
 	_, err := db.Exec(
-		"UPDATE items SET status = 'market', market_at = NOW() WHERE id = $1 AND owner_id = $2 AND status = 'private'",
+		"UPDATE items SET status = 'market' WHERE id = $1 AND owner_id = $2 AND status = 'private'",
 		itemID, ownerID,
 	)
 	return err
@@ -202,7 +204,7 @@ func PutItemOnMarket(db *sql.DB, itemID, ownerID int) error {
 // WithdrawItem はマーケット出品を取り下げてアイテムを非公開に戻す（status を "private" に変更）。
 func WithdrawItem(db *sql.DB, itemID, ownerID int) error {
 	_, err := db.Exec(
-		"UPDATE items SET status = 'private', market_at = NULL WHERE id = $1 AND owner_id = $2 AND status = 'market'",
+		"UPDATE items SET status = 'private' WHERE id = $1 AND owner_id = $2 AND status = 'market'",
 		itemID, ownerID,
 	)
 	return err
@@ -210,7 +212,8 @@ func WithdrawItem(db *sql.DB, itemID, ownerID int) error {
 
 // ApplyForItem はマーケット出品中のアイテムへの応募を処理する。
 // 行レベルロック（FOR UPDATE）を使い、複数ユーザーの同時応募による二重譲渡を防ぐ。
-// 成功した場合は所有者が applicantID に変わり、取引履歴が記録される。
+// 成功した場合はアイテムが "applying"（承認待ち）状態になり、応募レコードが記録される。
+// 所有権の移転は出品者が承認した時点で行われる（ApproveApplication を参照）。
 // 戻り値: (成功したか, エラー)
 func ApplyForItem(db *sql.DB, itemID, applicantID int) (bool, error) {
 	tx, err := db.Begin()
@@ -227,13 +230,18 @@ func ApplyForItem(db *sql.DB, itemID, applicantID int) (bool, error) {
 		return false, err
 	}
 
+	if applicantID == ownerID {
+		return false, ErrSelfApplication
+	}
+
 	if status != "market" {
 		return false, nil
 	}
 
+	// 所有権は移さず、承認待ち状態にする
 	_, err = tx.Exec(
-		"UPDATE items SET status = 'private', owner_id = $1, market_at = NULL WHERE id = $2",
-		applicantID, itemID,
+		"UPDATE items SET status = 'applying' WHERE id = $1",
+		itemID,
 	)
 	if err != nil {
 		return false, err
@@ -250,38 +258,8 @@ func ApplyForItem(db *sql.DB, itemID, applicantID int) (bool, error) {
 	return true, tx.Commit()
 }
 
-// ExpireMarketItems はマーケットに90日以上出品されたままのアイテムを削除済みにする。
-// 削除対象アイテムのIDリストを返すので、呼び出し側でファイル削除を行う。
-func ExpireMarketItems(db *sql.DB) ([]int, error) {
-	rows, err := db.Query(
-		"UPDATE items SET status = 'deleted' WHERE status = 'market' AND market_at < NOW() - INTERVAL '90 days' RETURNING id",
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 // DeleteItem はアイテムをDBから削除し、紐づく画像のファイルパス一覧を返す。
-// 取引履歴があるアイテムは削除できない（履歴保全のため）。
 func DeleteItem(db *sql.DB, itemID int) ([]string, error) {
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM transactions WHERE item_id = $1", itemID).Scan(&count); err != nil {
-		return nil, err
-	}
-	if count > 0 {
-		return nil, fmt.Errorf("このアイテムには取引履歴があるため削除できません")
-	}
-
 	rows, err := db.Query("SELECT file_path FROM item_images WHERE item_id = $1", itemID)
 	if err != nil {
 		return nil, err
