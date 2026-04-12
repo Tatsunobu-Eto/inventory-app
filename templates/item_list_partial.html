@@ -22,7 +22,7 @@
       <!-- Info -->
       <div class="p-2.5">
         <div class="text-xs font-semibold text-slate-800 line-clamp-2 leading-snug">{{.Title}}</div>
-        <div class="text-xs text-slate-400 mt-1 truncate">{{.OwnerName}}</div>
+        <div class="text-xs text-slate-400 mt-1 truncate">{{if .OwnerDeptName}}{{.OwnerDeptName}} {{end}}{{.OwnerName}}</div>
       </div>
     </a>
     <!-- Apply button -->

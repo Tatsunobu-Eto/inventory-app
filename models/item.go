@@ -22,6 +22,7 @@ type Item struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	// JOINで取得する表示用フィールド
 	OwnerName      string `json:"owner_name"`
+	OwnerDeptName  string `json:"owner_dept_name"`
 	DepartmentName string `json:"department_name"`
 }
 
@@ -40,9 +41,10 @@ type ItemFilter struct {
 // WHERE句をフィルタの内容に応じて動的に組み立てる。
 func ListItems(db *sql.DB, f ItemFilter) ([]Item, error) {
 	q := `SELECT i.id, i.department_id, i.title, i.description, i.owner_id, i.created_by,
-	             i.status, i.market_at, i.created_at, u.display_name, d.name
+	             i.status, i.market_at, i.created_at, u.display_name, COALESCE(du.name, ''), d.name
 	      FROM items i
 	      JOIN users u ON u.id = i.owner_id
+	      LEFT JOIN departments du ON du.id = u.department_id
 	      JOIN departments d ON d.id = i.department_id`
 	args := []any{}
 	n := 1
@@ -103,7 +105,7 @@ func ListItems(db *sql.DB, f ItemFilter) ([]Item, error) {
 		var it Item
 		if err := rows.Scan(&it.ID, &it.DepartmentID, &it.Title, &it.Description,
 			&it.OwnerID, &it.CreatedBy, &it.Status, &it.MarketAt, &it.CreatedAt,
-			&it.OwnerName, &it.DepartmentName); err != nil {
+			&it.OwnerName, &it.OwnerDeptName, &it.DepartmentName); err != nil {
 			return nil, err
 		}
 		items = append(items, it)

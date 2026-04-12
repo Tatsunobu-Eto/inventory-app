@@ -17,9 +17,11 @@ type Transaction struct {
 	CreatedAt    time.Time `json:"created_at"`
 	FromUserRead bool      `json:"from_user_read"`
 	// JOINで取得する表示用フィールド
-	ItemTitle    string `json:"item_title"`
-	FromUserName string `json:"from_user_name"`
-	ToUserName   string `json:"to_user_name"`
+	ItemTitle        string `json:"item_title"`
+	FromUserName     string `json:"from_user_name"`
+	FromUserDeptName string `json:"from_user_dept_name"`
+	ToUserName       string `json:"to_user_name"`
+	ToUserDeptName   string `json:"to_user_dept_name"`
 }
 
 // CountTransactionsByUser は指定ユーザーが関わる取引の総件数を返す（送信・受信どちらも含む）。
@@ -37,11 +39,13 @@ func CountTransactionsByUser(db *sql.DB, userID int) (int, error) {
 func ListTransactionsByUser(db *sql.DB, userID, limit, offset int) ([]Transaction, error) {
 	rows, err := db.Query(`
 		SELECT t.id, t.item_id, t.from_user_id, t.to_user_id, t.created_at, t.from_user_read,
-		       i.title, fu.display_name, tu.display_name
+		       i.title, fu.display_name, COALESCE(fd.name, ''), tu.display_name, COALESCE(td.name, '')
 		FROM transactions t
 		JOIN items i ON i.id = t.item_id
 		JOIN users fu ON fu.id = t.from_user_id
+		LEFT JOIN departments fd ON fd.id = fu.department_id
 		JOIN users tu ON tu.id = t.to_user_id
+		LEFT JOIN departments td ON td.id = tu.department_id
 		WHERE t.from_user_id = $1 OR t.to_user_id = $1
 		ORDER BY t.created_at DESC
 		LIMIT $2 OFFSET $3
@@ -55,7 +59,7 @@ func ListTransactionsByUser(db *sql.DB, userID, limit, offset int) ([]Transactio
 	for rows.Next() {
 		var tx Transaction
 		if err := rows.Scan(&tx.ID, &tx.ItemID, &tx.FromUserID, &tx.ToUserID, &tx.CreatedAt, &tx.FromUserRead,
-			&tx.ItemTitle, &tx.FromUserName, &tx.ToUserName); err != nil {
+			&tx.ItemTitle, &tx.FromUserName, &tx.FromUserDeptName, &tx.ToUserName, &tx.ToUserDeptName); err != nil {
 			return nil, err
 		}
 		txs = append(txs, tx)
@@ -87,17 +91,19 @@ func GetLatestTransactionForItem(db *sql.DB, itemID int) (*Transaction, error) {
 	var tx Transaction
 	err := db.QueryRow(`
 		SELECT t.id, t.item_id, t.from_user_id, t.to_user_id, t.created_at, t.from_user_read,
-		       i.title, fu.display_name, tu.display_name
+		       i.title, fu.display_name, COALESCE(fd.name, ''), tu.display_name, COALESCE(td.name, '')
 		FROM transactions t
 		JOIN items i ON i.id = t.item_id
 		JOIN users fu ON fu.id = t.from_user_id
+		LEFT JOIN departments fd ON fd.id = fu.department_id
 		JOIN users tu ON tu.id = t.to_user_id
+		LEFT JOIN departments td ON td.id = tu.department_id
 		WHERE t.item_id = $1
 		ORDER BY t.created_at DESC
 		LIMIT 1
 	`, itemID).Scan(
 		&tx.ID, &tx.ItemID, &tx.FromUserID, &tx.ToUserID, &tx.CreatedAt, &tx.FromUserRead,
-		&tx.ItemTitle, &tx.FromUserName, &tx.ToUserName,
+		&tx.ItemTitle, &tx.FromUserName, &tx.FromUserDeptName, &tx.ToUserName, &tx.ToUserDeptName,
 	)
 	if err != nil {
 		return nil, err

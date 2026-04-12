@@ -102,8 +102,7 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total, err := models.CountItems(e.DB, models.ItemFilter{
-		DepartmentID: *user.DepartmentID,
-		OwnerID:      user.ID,
+		OwnerID: user.ID,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -118,10 +117,9 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := models.ListItems(e.DB, models.ItemFilter{
-		DepartmentID: *user.DepartmentID,
-		OwnerID:      user.ID,
-		Limit:        perPage,
-		Offset:       (page - 1) * perPage,
+		OwnerID: user.ID,
+		Limit:   perPage,
+		Offset:  (page - 1) * perPage,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -307,16 +305,14 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 部門チェック: sysadmin以外は自部門のアイテムのみアクセス可（マーケット出品中は全部門から閲覧可）
+	// 部門チェック: sysadmin・オーナー本人以外は自部門のアイテムのみアクセス可（マーケット出品中は全部門から閲覧可）
 	isMarketItem := item.Status == "market"
-	if user.Role != "sysadmin" && !isMarketItem &&
+	isOwner := user.ID == item.OwnerID
+	if user.Role != "sysadmin" && !isMarketItem && !isOwner &&
 		(user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
 		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
-
-	// Check if the current user is the owner of the item
-	isOwner := user.ID == item.OwnerID
 
 	// Fetch images for the item
 	images, err := models.ListItemImages(e.DB, itemID)

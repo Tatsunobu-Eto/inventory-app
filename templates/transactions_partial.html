@@ -14,7 +14,7 @@
       <div class="text-sm font-semibold text-slate-800">{{.ItemTitle}}</div>
       <div class="text-xs text-slate-500 mt-1">
         <span class="text-emerald-600 font-medium">受け取り</span>
-        &nbsp;·&nbsp;{{.FromUserName}} から
+        &nbsp;·&nbsp;{{if .FromUserDeptName}}{{.FromUserDeptName}} {{end}}{{.FromUserName}} から
       </div>
       <div class="text-xs text-slate-400 mt-1">{{.CreatedAt.Format "2006-01-02 15:04"}}</div>
     </div>
@@ -36,7 +36,7 @@
       <div class="text-sm font-semibold text-slate-800">{{.ItemTitle}}</div>
       <div class="text-xs text-slate-500 mt-1">
         <span class="text-sky-600 font-medium">譲渡</span>
-        &nbsp;·&nbsp;{{.ToUserName}} へ
+        &nbsp;·&nbsp;{{if .ToUserDeptName}}{{.ToUserDeptName}} {{end}}{{.ToUserName}} へ
       </div>
       <div class="text-xs text-slate-400 mt-1">{{.CreatedAt.Format "2006-01-02 15:04"}}</div>
     </div>
