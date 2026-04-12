@@ -15,13 +15,15 @@ import (
 	"github.com/lib/pq"
 )
 
+// deptWithUsers は部門情報とその所属ユーザー一覧をまとめた表示用の構造体。
 type deptWithUsers struct {
 	models.Department
 	Users []models.User
 }
 
-// --- System Admin handlers ---
+// --- システム管理者（sysadmin）用ハンドラ ---
 
+// SysAdminDepartments は全部門とその所属ユーザー一覧を表示する。
 func (e *Env) SysAdminDepartments(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	deps, err := models.ListDepartments(e.DB)
@@ -41,6 +43,7 @@ func (e *Env) SysAdminDepartments(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "sysadmin_departments.html", map[string]any{"User": user, "Depts": depts})
 }
 
+// SysAdminCreateDepartment は新しい部門を作成する。部門名が既に存在する場合はエラーを返す。
 func (e *Env) SysAdminCreateDepartment(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("name")
 	if name == "" {
@@ -66,6 +69,7 @@ func (e *Env) SysAdminCreateDepartment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminCreateAdmin は指定部門の部門管理者（admin）アカウントを作成する。
 func (e *Env) SysAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	deptID, convErr := strconv.Atoi(r.FormValue("department_id"))
 	username := r.FormValue("username")
@@ -90,6 +94,7 @@ func (e *Env) SysAdminCreateAdmin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminPromoteToAdmin は一般ユーザーを部門管理者に昇格させる。
 func (e *Env) SysAdminPromoteToAdmin(w http.ResponseWriter, r *http.Request) {
 	userID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
 	if err != nil {
@@ -117,6 +122,7 @@ func (e *Env) SysAdminPromoteToAdmin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminDemoteToUser は部門管理者を一般ユーザーに降格させる。
 func (e *Env) SysAdminDemoteToUser(w http.ResponseWriter, r *http.Request) {
 	userID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
 	if err != nil {
@@ -144,6 +150,7 @@ func (e *Env) SysAdminDemoteToUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminAllItems は全部門のアイテム一覧を表示する。ステータス・ユーザー・キーワードで絞り込み可能。
 func (e *Env) SysAdminAllItems(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 
@@ -206,8 +213,9 @@ func (e *Env) SysAdminAllItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Department Admin handlers ---
+// --- 部門管理者（admin）用ハンドラ ---
 
+// AdminUsers は自分の部門のユーザー一覧と部門情報を表示する。
 func (e *Env) AdminUsers(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -235,6 +243,7 @@ func (e *Env) AdminUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AdminCreateUser は自分の部門に一般ユーザーを新規作成する。
 func (e *Env) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	currentUser := mw.CurrentUser(r)
 	if currentUser.DepartmentID == nil {
@@ -264,6 +273,7 @@ func (e *Env) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// AdminCreateItem は部門管理者が部門メンバーの代わりにアイテムを登録する（代理登録）。
 func (e *Env) AdminCreateItem(w http.ResponseWriter, r *http.Request) {
 	currentUser := mw.CurrentUser(r)
 	if currentUser.DepartmentID == nil {
@@ -311,6 +321,7 @@ func (e *Env) AdminCreateItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// AdminCreateItemForm はアイテム代理登録フォームを表示する。部門内ユーザー一覧も渡す。
 func (e *Env) AdminCreateItemForm(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -327,6 +338,7 @@ func (e *Env) AdminCreateItemForm(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "admin_item_form.html", map[string]any{"User": user, "Users": users})
 }
 
+// AdminDeptItems は自分の部門のアイテム一覧を表示する。ステータス・ユーザー・キーワードで絞り込み可能。
 func (e *Env) AdminDeptItems(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -395,8 +407,9 @@ func (e *Env) AdminDeptItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Department Admin: delete user / reset password ---
+// --- 部門管理者：ユーザー管理操作 ---
 
+// AdminDeleteUser は自部門の一般ユーザーを削除する。管理者ロールのユーザーは削除不可。
 func (e *Env) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	currentUser := mw.CurrentUser(r)
 	if currentUser.DepartmentID == nil {
@@ -433,6 +446,7 @@ func (e *Env) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// AdminResetPassword は自部門の一般ユーザーのパスワードを管理者がリセットする。
 func (e *Env) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	currentUser := mw.CurrentUser(r)
 	if currentUser.DepartmentID == nil {
@@ -469,6 +483,7 @@ func (e *Env) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// AdminTransferUser は自部門の一般ユーザーを別の部門に異動させる。所有アイテムの部門も同時に変更される。
 func (e *Env) AdminTransferUser(w http.ResponseWriter, r *http.Request) {
 	currentUser := mw.CurrentUser(r)
 	if currentUser.DepartmentID == nil {
@@ -511,8 +526,9 @@ func (e *Env) AdminTransferUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// --- System Admin: delete user / reset password ---
+// --- システム管理者：ユーザー管理操作 ---
 
+// SysAdminDeleteUser は全ユーザーを対象にユーザーを削除する（全部門の範囲）。
 func (e *Env) SysAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
 	if err != nil {
@@ -540,6 +556,7 @@ func (e *Env) SysAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminResetPassword は全ユーザーを対象にパスワードをリセットする（全部門の範囲）。
 func (e *Env) SysAdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
 	if err != nil {
@@ -567,6 +584,7 @@ func (e *Env) SysAdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// SysAdminTransferUser は全ユーザーを対象に部門異動を行う（全部門の範囲）。sysadmin 自身は異動不可。
 func (e *Env) SysAdminTransferUser(w http.ResponseWriter, r *http.Request) {
 	targetID, err := strconv.Atoi(chi.URLParam(r, "user_id"))
 	if err != nil {

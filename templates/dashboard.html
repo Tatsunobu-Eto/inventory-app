@@ -25,6 +25,15 @@
       <div class="text-base font-semibold text-slate-800 mb-1">マイアイテム</div>
       <div class="text-xs text-slate-400">所有アイテムの管理・出品</div>
     </a>
+    <a href="/transactions" class="group bg-white border border-slate-200 rounded-2xl p-6 hover:border-amber-300 hover:shadow-md transition-all">
+      <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-4 group-hover:bg-amber-200 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+      </div>
+      <div class="text-base font-semibold text-slate-800 mb-1">取引履歴</div>
+      <div class="text-xs text-slate-400">アイテムの取引履歴を確認</div>
+    </a>
     {{end}}
 
     {{if eq .User.Role "admin"}}
@@ -66,6 +75,15 @@
       </div>
       <div class="text-base font-semibold text-slate-800 mb-1">部門管理</div>
       <div class="text-xs text-slate-400">部門の作成と管理者の設定</div>
+    </a>
+    <a href="/sysadmin/items" class="group bg-white border border-slate-200 rounded-2xl p-6 hover:border-teal-300 hover:shadow-md transition-all">
+      <div class="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center mb-4 group-hover:bg-teal-200 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+        </svg>
+      </div>
+      <div class="text-base font-semibold text-slate-800 mb-1">全アイテム一覧</div>
+      <div class="text-xs text-slate-400">全部門のアイテムを確認・管理</div>
     </a>
     {{end}}
   </div>

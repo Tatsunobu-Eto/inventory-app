@@ -13,10 +13,14 @@ import (
 	"inventory-app/models"
 )
 
+// uploadDir は画像ファイルの保存先ディレクトリ。
 const uploadDir = "uploads"
+
+// maxUploadSize はアップロード可能な1ファイルの最大サイズ（10MB）。
 const maxUploadSize = 10 << 20 // 10MB
 
-// SaveUploadedImages parses multipart form files and saves them to disk.
+// SaveUploadedImages はマルチパートフォームから画像ファイルを受け取り、ディスクに保存してDBにも登録する。
+// 対応形式: jpg/jpeg/png/gif/webp。途中でエラーが発生した場合は保存済みファイルを削除してロールバックする。
 func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 	if r.MultipartForm == nil {
 		return nil
@@ -33,6 +37,7 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 	}
 
 	var savedFiles []string
+	// rollback はエラー発生時に保存済みファイルをすべて削除するクリーンアップ関数
 	rollback := func() {
 		for _, f := range savedFiles {
 			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
@@ -53,8 +58,9 @@ func (e *Env) SaveUploadedImages(r *http.Request, itemID int) error {
 			return err
 		}
 
+		// ファイル名はナノ秒タイムスタンプで一意性を確保する
 		filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
-		// Always use forward slash for URL-safe DB storage
+		// DBには "/" 区切りのURLセーフなパスで保存する
 		relPath := fmt.Sprintf("%d/%s", itemID, filename)
 		dstPath := filepath.Join(uploadDir, fmt.Sprintf("%d", itemID), filename)
 

@@ -18,6 +18,8 @@ const maxImages = 5
 
 // const uploadDir = "uploads" // 削除：handlers/images.goで定義済み
 
+// collectImages はアイテム一覧に対応する画像をまとめて取得する。
+// N+1クエリを避けるためアイテムIDをまとめて1回のDBクエリで取得する。
 func collectImages(e *Env, items []models.Item) map[int][]models.ItemImage {
 	ids := make([]int, len(items))
 	for i, it := range items {
@@ -30,6 +32,8 @@ func collectImages(e *Env, items []models.Item) map[int][]models.ItemImage {
 	return m
 }
 
+// MarketList はマーケット一覧を表示する。キーワード検索とページネーションに対応。
+// HTMX からのリクエスト（HX-Request ヘッダあり）の場合はリスト部分のみを返す。
 func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 
@@ -84,6 +88,7 @@ func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "market.html", data)
 }
 
+// MyItems はログインユーザーが所有するアイテム一覧を表示する。ページネーション対応。
 func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -139,11 +144,13 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "my_items.html", data)
 }
 
+// CreateItemForm はアイテム登録フォームを表示する。
 func (e *Env) CreateItemForm(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	e.render(w, "item_form.html", map[string]any{"User": user})
 }
 
+// CreateItemPost はアイテム登録フォームの送信を処理し、アイテムと画像をDBに保存する。
 func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -182,6 +189,7 @@ func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// PutOnMarket はアイテムをマーケットに出品する。アイテムIDをフォームから受け取る。
 func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -200,6 +208,7 @@ func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// WithdrawFromMarket はマーケット出品を取り下げてアイテムを非公開に戻す。
 func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -218,6 +227,8 @@ func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ApplyForItem はマーケット出品中のアイテムへの応募を処理する。
+// 同じ部門のメンバーのみ応募可能。競合する同時応募はDBのトランザクションで制御される。
 func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -253,6 +264,8 @@ func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ItemDetail はアイテムの詳細画面を表示する。
+// クエリパラメータ "from" によって「戻る」リンクの遷移先を切り替える。
 func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -311,6 +324,7 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "item_detail.html", data)
 }
 
+// UpdateItemPost はアイテムの説明文と画像を更新する。アイテムの所有者のみ操作可能。
 func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -331,15 +345,14 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	description := r.FormValue("description")
-	// Allow title update as well if needed. For now, only description.
+	// 現在は説明文のみ更新対象（タイトル変更が必要になった場合はここに追加）
 
 	if err := models.UpdateItemDescription(e.DB, itemID, description); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Handle image uploads
-	// First, count existing images
+	// 既存の画像枚数を確認し、追加後に上限を超えないかチェックする
 	existingImages, err := models.ListItemImages(e.DB, itemID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -366,6 +379,7 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Transactions はログインユーザーの取引履歴を表示する。ページネーション対応。
 func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 
@@ -407,6 +421,8 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 	e.render(w, "transactions.html", data)
 }
 
+// DeleteItem はアイテムをDBから削除し、紐づく画像ファイルもディスクから削除する。
+// 所有者本人かつ非公開状態のアイテムのみ削除可能。取引履歴があるアイテムは削除不可。
 func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -453,6 +469,7 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// DeleteItemImage はアイテムの画像1枚をDBとディスクから削除する。アイテムの所有者のみ操作可能。
 func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	imageID, err := strconv.Atoi(chi.URLParam(r, "image_id"))

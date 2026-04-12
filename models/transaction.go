@@ -5,19 +5,22 @@ import (
 	"time"
 )
 
+// Transaction はアイテムの譲渡履歴1件を表す。
+// FromUserID が元の所有者、ToUserID が新しい所有者（応募した側）。
+// ItemTitle・FromUserName・ToUserName はSQLのJOINで取得した表示用フィールド。
 type Transaction struct {
 	ID           int       `json:"id"`
 	ItemID       int       `json:"item_id"`
 	FromUserID   int       `json:"from_user_id"`
 	ToUserID     int       `json:"to_user_id"`
 	CreatedAt    time.Time `json:"created_at"`
-	// joined fields
+	// JOINで取得する表示用フィールド
 	ItemTitle    string `json:"item_title"`
 	FromUserName string `json:"from_user_name"`
 	ToUserName   string `json:"to_user_name"`
 }
 
-// CountTransactionsByUser returns the total number of transactions for the user.
+// CountTransactionsByUser は指定ユーザーが関わる取引の総件数を返す（送信・受信どちらも含む）。
 func CountTransactionsByUser(db *sql.DB, userID int) (int, error) {
 	var count int
 	err := db.QueryRow(
@@ -27,7 +30,8 @@ func CountTransactionsByUser(db *sql.DB, userID int) (int, error) {
 	return count, err
 }
 
-// ListTransactionsByUser returns transactions where the user is sender or receiver.
+// ListTransactionsByUser は指定ユーザーが送信者または受信者の取引履歴を新しい順で返す。
+// ページネーション用に limit と offset を指定できる。
 func ListTransactionsByUser(db *sql.DB, userID, limit, offset int) ([]Transaction, error) {
 	rows, err := db.Query(`
 		SELECT t.id, t.item_id, t.from_user_id, t.to_user_id, t.created_at,

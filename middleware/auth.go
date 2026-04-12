@@ -10,16 +10,21 @@ import (
 	"github.com/gorilla/sessions"
 )
 
+// contextKey はリクエストコンテキストのキー型。文字列との混在を防ぐための専用型。
 type contextKey string
 
+// UserKey はコンテキストにログイン中ユーザーを格納する際に使うキー。
 const UserKey contextKey = "user"
 
+// CurrentUser はリクエストコンテキストからログイン中ユーザーを取り出す。
+// Auth ミドルウェアが設定した値を返す。未ログイン時は nil。
 func CurrentUser(r *http.Request) *models.User {
 	u, _ := r.Context().Value(UserKey).(*models.User)
 	return u
 }
 
-// Auth loads the user from session and injects into context.
+// Auth はセッションからユーザーIDを読み取り、DBでユーザー情報を確認してコンテキストに注入するミドルウェア。
+// セッションが無効またはユーザーが存在しない場合は /login にリダイレクトする。
 func Auth(db *sql.DB, store sessions.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +45,8 @@ func Auth(db *sql.DB, store sessions.Store) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireRole returns middleware that checks the user has one of the allowed roles.
+// RequireRole は指定されたロールを持つユーザーのみ通過を許可するミドルウェアを返す。
+// ロールが一致しない場合は HTTP 403 Forbidden を返す。
 func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(roles))
 	for _, r := range roles {

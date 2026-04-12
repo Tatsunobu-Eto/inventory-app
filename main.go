@@ -36,6 +36,8 @@ var staticFS embed.FS
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// main はアプリケーションのエントリポイント。
+// .env 読み込み → DB接続 → マイグレーション → 初期ユーザー作成 → バックグラウンドジョブ起動 → HTTPサーバー起動 の順で処理する。
 func main() {
 	_ = godotenv.Load()
 
@@ -54,13 +56,13 @@ func main() {
 		log.Fatalf("DB ping: %v", err)
 	}
 
-	// Run migrations
+	// DBマイグレーションを実行する（未適用のものだけ実行される）
 	runMigrations(db)
 
-	// Seed initial sysadmin
+	// sysadmin が1人もいない場合は初期ユーザーを作成する
 	seedSysadmin(db)
 
-	// Start background job for 90-day expiry
+	// 90日期限切れのマーケット出品を自動削除するバックグラウンドジョブ（毎時実行）
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
@@ -89,26 +91,26 @@ func main() {
 	r.Use(chiMw.Logger)
 	r.Use(chiMw.Recoverer)
 
-	// Static files
+	// 静的ファイル（CSS・JS）をバイナリ埋め込みから配信する
 	staticSub, _ := fs.Sub(staticFS, "static")
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Uploaded images
+	// アップロードされた画像をディスクから配信する
 	os.MkdirAll("uploads", 0o755)
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
-	// Public routes
+	// 認証不要の公開ルート
 	r.Get("/login", env.LoginPage)
 	r.Post("/login", env.LoginPost)
 	r.Get("/logout", env.Logout)
 
-	// Authenticated routes
+	// 要ログインのルート（Auth ミドルウェアでセッションを検証する）
 	r.Group(func(r chi.Router) {
 		r.Use(mw.Auth(db, store))
 
 		r.Get("/", env.Dashboard)
 
-		// User / Admin item routes
+		// 一般ユーザー・管理者共通のアイテム操作ルート
 		r.Get("/market", env.MarketList)
 		r.Get("/my-items", env.MyItems)
 		r.Get("/items/new", env.CreateItemForm)
@@ -117,20 +119,20 @@ func main() {
 		r.Post("/items/withdraw", env.WithdrawFromMarket)
 		r.Post("/items/apply", env.ApplyForItem)
 
-		// Transaction history
+		// 取引履歴
 		r.Get("/transactions", env.Transactions)
 
-		// Password change
+		// パスワード変更
 		r.Get("/profile/password", env.PasswordChangePage)
 		r.Post("/profile/password", env.PasswordChangePost)
 
-		// New item detail and update routes
+		// アイテム詳細・更新・削除
 		r.Get("/items/{item_id}", env.ItemDetail)
 		r.Post("/items/{item_id}", env.UpdateItemPost)
 		r.Post("/items/{item_id}/delete", env.DeleteItem)
 		r.Post("/items/images/{image_id}/delete", env.DeleteItemImage)
 
-		// Department admin routes
+		// 部門管理者（admin）専用ルート
 		r.Group(func(r chi.Router) {
 			r.Use(mw.RequireRole("admin"))
 			r.Get("/admin/users", env.AdminUsers)
@@ -143,7 +145,7 @@ func main() {
 			r.Post("/admin/items", env.AdminCreateItem)
 		})
 
-		// System admin routes
+		// システム管理者（sysadmin）専用ルート
 		r.Group(func(r chi.Router) {
 			r.Use(mw.RequireRole("sysadmin"))
 			r.Get("/sysadmin/departments", env.SysAdminDepartments)
@@ -166,6 +168,8 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
+// runMigrations はバイナリに埋め込まれたSQLファイルを使ってDBマイグレーションを実行する。
+// 既に適用済みの場合は何もしない（ErrNoChange を正常として扱う）。
 func runMigrations(db *sql.DB) {
 	migFS, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -189,8 +193,8 @@ func runMigrations(db *sql.DB) {
 	log.Println("Migrations applied successfully")
 }
 
-// cleanupItemFiles deletes upload files for the given item IDs from disk.
-// Called after items are expired or deleted so no orphan files remain.
+// cleanupItemFiles は指定アイテムIDに紐づく画像ファイルをディスクから削除する。
+// アイテムの期限切れ・削除後に呼び出し、孤立したファイルを残さないようにする。
 func cleanupItemFiles(db *sql.DB, itemIDs []int) {
 	imgMap, err := models.ListItemImagesByItems(db, itemIDs)
 	if err != nil {
@@ -211,6 +215,8 @@ func cleanupItemFiles(db *sql.DB, itemIDs []int) {
 	}
 }
 
+// seedSysadmin はシステム管理者が1人もいない場合に、環境変数から初期 sysadmin を作成する。
+// 初回起動時のみ実行される想定。
 func seedSysadmin(db *sql.DB) {
 	count, err := models.CountSysadmins(db)
 	if err != nil {
