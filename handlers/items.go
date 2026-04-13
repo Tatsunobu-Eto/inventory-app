@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	mw "inventory-app/middleware"
 	"inventory-app/models"
 
+	"errors"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,6 +21,8 @@ const maxImages = 5
 
 // const uploadDir = "uploads" // 削除：handlers/images.goで定義済み
 
+// collectImages はアイテム一覧に対応する画像をまとめて取得する。
+// N+1クエリを避けるためアイテムIDをまとめて1回のDBクエリで取得する。
 func collectImages(e *Env, items []models.Item) map[int][]models.ItemImage {
 	ids := make([]int, len(items))
 	for i, it := range items {
@@ -30,6 +35,8 @@ func collectImages(e *Env, items []models.Item) map[int][]models.ItemImage {
 	return m
 }
 
+// MarketList はマーケット一覧を表示する。キーワード検索とページネーションに対応。
+// HTMX からのリクエスト（HX-Request ヘッダあり）の場合はリスト部分のみを返す。
 func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 
@@ -81,9 +88,10 @@ func (e *Env) MarketList(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "item_list_partial.html", data)
 		return
 	}
-	e.render(w, "market.html", data)
+	e.render(w, r, "market.html", data)
 }
 
+// MyItems はログインユーザーが所有するアイテム一覧を表示する。ページネーション対応。
 func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -97,8 +105,7 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total, err := models.CountItems(e.DB, models.ItemFilter{
-		DepartmentID: *user.DepartmentID,
-		OwnerID:      user.ID,
+		OwnerID: user.ID,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -113,10 +120,9 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := models.ListItems(e.DB, models.ItemFilter{
-		DepartmentID: *user.DepartmentID,
-		OwnerID:      user.ID,
-		Limit:        perPage,
-		Offset:       (page - 1) * perPage,
+		OwnerID: user.ID,
+		Limit:   perPage,
+		Offset:  (page - 1) * perPage,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -136,14 +142,16 @@ func (e *Env) MyItems(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "my_items_partial.html", data)
 		return
 	}
-	e.render(w, "my_items.html", data)
+	e.render(w, r, "my_items.html", data)
 }
 
+// CreateItemForm はアイテム登録フォームを表示する。
 func (e *Env) CreateItemForm(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
-	e.render(w, "item_form.html", map[string]any{"User": user})
+	e.render(w, r, "item_form.html", map[string]any{"User": user})
 }
 
+// CreateItemPost はアイテム登録フォームの送信を処理し、アイテムと画像をDBに保存する。
 func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	if user.DepartmentID == nil {
@@ -182,6 +190,7 @@ func (e *Env) CreateItemPost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// PutOnMarket はアイテムをマーケットに出品する。アイテムIDをフォームから受け取る。
 func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -200,6 +209,7 @@ func (e *Env) PutOnMarket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// WithdrawFromMarket はマーケット出品を取り下げてアイテムを非公開に戻す。
 func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -218,6 +228,8 @@ func (e *Env) WithdrawFromMarket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ApplyForItem はマーケット出品中のアイテムへの応募を処理する。
+// 部門に関係なく全ユーザーが応募可能。競合する同時応募はDBのトランザクションで制御される。
 func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, convErr := strconv.Atoi(r.FormValue("item_id"))
@@ -226,19 +238,13 @@ func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 部門チェック: アイテムが自分の部門に属しているか確認
-	item, err := models.GetItem(e.DB, itemID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID {
-		http.Error(w, "権限がありません", http.StatusForbidden)
-		return
-	}
-
 	ok, err := models.ApplyForItem(e.DB, itemID, user.ID)
 	if err != nil {
+		if errors.Is(err, models.ErrSelfApplication) {
+			w.WriteHeader(http.StatusBadRequest)
+			triggerToast(w, "自分のアイテムには応募できません")
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -248,11 +254,35 @@ func (e *Env) ApplyForItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	triggerToast(w, "応募が完了しました！")
-	w.Header().Set("HX-Redirect", "/my-items")
+	w.Header().Set("HX-Redirect", fmt.Sprintf("/apply/success?item_id=%d", itemID))
 	w.WriteHeader(http.StatusOK)
 }
 
+// ApplySuccess は応募成功後の確認ページを表示する。
+// 取引成立したアイテムの情報と「出品者と直接連絡してください」メッセージを表示する。
+func (e *Env) ApplySuccess(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	itemID, err := strconv.Atoi(r.URL.Query().Get("item_id"))
+	if err != nil || itemID == 0 {
+		http.Redirect(w, r, "/my-items", http.StatusSeeOther)
+		return
+	}
+
+	tx, err := models.GetLatestTransactionForItem(e.DB, itemID)
+	if err != nil {
+		http.Redirect(w, r, "/my-items", http.StatusSeeOther)
+		return
+	}
+
+	e.render(w, r, "apply_success.html", map[string]any{
+		"User":       user,
+		"ItemTitle":  tx.ItemTitle,
+		"SellerName": tx.FromUserName,
+	})
+}
+
+// ItemDetail はアイテムの詳細画面を表示する。
+// クエリパラメータ "from" によって「戻る」リンクの遷移先を切り替える。
 func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -283,14 +313,14 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 部門チェック: sysadmin以外は自部門のアイテムのみアクセス可
-	if user.Role != "sysadmin" && (user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
+	// 部門チェック: sysadmin・オーナー本人以外は自部門のアイテムのみアクセス可（マーケット出品中は全部門から閲覧可）
+	isMarketItem := item.Status == "market"
+	isOwner := user.ID == item.OwnerID
+	if user.Role != "sysadmin" && !isMarketItem && !isOwner &&
+		(user.DepartmentID == nil || item.DepartmentID != *user.DepartmentID) {
 		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
-
-	// Check if the current user is the owner of the item
-	isOwner := user.ID == item.OwnerID
 
 	// Fetch images for the item
 	images, err := models.ListItemImages(e.DB, itemID)
@@ -299,18 +329,23 @@ func (e *Env) ItemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isAdmin := user.Role == "admin" && user.DepartmentID != nil && *user.DepartmentID == item.DepartmentID
+	isSysAdmin := user.Role == "sysadmin"
+
 	data := map[string]any{
-		"User":     user,
-		"Item":     item,
-		"Images":   images,
-		"IsOwner":  isOwner,
-		"BackURL":  backURL,
-		"BackText": backText,
+		"User":      user,
+		"Item":      item,
+		"Images":    images,
+		"IsOwner":   isOwner,
+		"IsAdmin":   isAdmin || isSysAdmin,
+		"BackURL":   backURL,
+		"BackText":  backText,
 	}
 
-	e.render(w, "item_detail.html", data)
+	e.render(w, r, "item_detail.html", data)
 }
 
+// UpdateItemPost はアイテムの説明文と画像を更新する。アイテムの所有者のみ操作可能。
 func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -330,16 +365,20 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if item.Status == "applying" {
+		http.Error(w, "承認待ち中はアイテムを編集できません", http.StatusForbidden)
+		return
+	}
+
 	description := r.FormValue("description")
-	// Allow title update as well if needed. For now, only description.
+	// 現在は説明文のみ更新対象（タイトル変更が必要になった場合はここに追加）
 
 	if err := models.UpdateItemDescription(e.DB, itemID, description); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Handle image uploads
-	// First, count existing images
+	// 既存の画像枚数を確認し、追加後に上限を超えないかチェックする
 	existingImages, err := models.ListItemImages(e.DB, itemID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -366,6 +405,7 @@ func (e *Env) UpdateItemPost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Transactions はログインユーザーの取引履歴を表示する。ページネーション対応。
 func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 
@@ -393,6 +433,9 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ページを開いた時点で自分が出品者として関わる未読取引を全て既読にする
+	_ = models.MarkTransactionsReadForUser(e.DB, user.ID)
+
 	data := map[string]any{
 		"User":         user,
 		"Transactions": txs,
@@ -404,9 +447,11 @@ func (e *Env) Transactions(w http.ResponseWriter, r *http.Request) {
 		e.renderPartial(w, "transactions_partial.html", data)
 		return
 	}
-	e.render(w, "transactions.html", data)
+	e.render(w, r, "transactions.html", data)
 }
 
+// DeleteItem はアイテムをDBから削除し、紐づく画像ファイルもディスクから削除する。
+// 所有者本人（private のみ）・同部門の admin・sysadmin が削除可能。
 func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	itemID, err := strconv.Atoi(chi.URLParam(r, "item_id"))
@@ -421,11 +466,16 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.ID != item.OwnerID {
+	isOwner := user.ID == item.OwnerID
+	isAdmin := user.Role == "admin" && user.DepartmentID != nil && *user.DepartmentID == item.DepartmentID
+	isSysAdmin := user.Role == "sysadmin"
+
+	if !isOwner && !isAdmin && !isSysAdmin {
 		http.Error(w, "権限がありません", http.StatusForbidden)
 		return
 	}
 
+	// 所有者・admin・sysadmin いずれも private のみ削除可
 	if item.Status != "private" {
 		triggerToast(w, "非公開状態のアイテムのみ削除できます")
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -453,6 +503,55 @@ func (e *Env) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ApproveTransaction は応募を承認する。出品者本人のみ操作可能。
+// 承認後、所有権が応募者に移り、応募レコードは削除される。
+func (e *Env) ApproveTransaction(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	txID, err := strconv.Atoi(chi.URLParam(r, "transaction_id"))
+	if err != nil {
+		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := models.ApproveApplication(e.DB, txID, user.ID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "権限がないか、対象の応募が見つかりません", http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "応募を承認しました")
+	w.Header().Set("HX-Redirect", "/transactions")
+	w.WriteHeader(http.StatusOK)
+}
+
+// RejectTransaction は応募を拒否する。出品者本人のみ操作可能。
+// 拒否後、アイテムはマーケットに戻り、応募レコードは削除される。
+func (e *Env) RejectTransaction(w http.ResponseWriter, r *http.Request) {
+	user := mw.CurrentUser(r)
+	txID, err := strconv.Atoi(chi.URLParam(r, "transaction_id"))
+	if err != nil {
+		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := models.RejectApplication(e.DB, txID, user.ID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "権限がないか、対象の応募が見つかりません", http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	triggerToast(w, "応募を拒否しました")
+	w.Header().Set("HX-Redirect", "/transactions")
+	w.WriteHeader(http.StatusOK)
+}
+
+// DeleteItemImage はアイテムの画像1枚をDBとディスクから削除する。アイテムの所有者のみ操作可能。
 func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 	user := mw.CurrentUser(r)
 	imageID, err := strconv.Atoi(chi.URLParam(r, "image_id"))
@@ -475,6 +574,11 @@ func (e *Env) DeleteItemImage(w http.ResponseWriter, r *http.Request) {
 
 	if user.ID != item.OwnerID {
 		http.Error(w, "権限がありません", http.StatusForbidden)
+		return
+	}
+
+	if item.Status == "applying" {
+		http.Error(w, "承認待ち中はアイテムを編集できません", http.StatusForbidden)
 		return
 	}
 

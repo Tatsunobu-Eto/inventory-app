@@ -6,24 +6,30 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// User はシステムのログインユーザーを表す。
+// Role は "sysadmin"（システム管理者）/ "admin"（部門管理者）/ "user"（一般ユーザー）の3種類。
+// DepartmentID は sysadmin の場合 nil になる。
 type User struct {
 	ID           int    `json:"id"`
 	DepartmentID *int   `json:"department_id"`
 	Username     string `json:"username"`
-	PasswordHash string `json:"-"`
+	PasswordHash string `json:"-"` // JSON出力には含めない
 	DisplayName  string `json:"display_name"`
 	Role         string `json:"role"` // sysadmin, admin, user
 }
 
+// HashPassword はパスワードをbcryptでハッシュ化して返す。
 func HashPassword(password string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(b), err
 }
 
+// CheckPassword はハッシュとパスワードが一致するか検証する。一致すれば true を返す。
 func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
+// GetUserByUsername はユーザー名でユーザーを取得する。存在しない場合は sql.ErrNoRows を返す。
 func GetUserByUsername(db *sql.DB, username string) (User, error) {
 	var u User
 	err := db.QueryRow(
@@ -33,6 +39,7 @@ func GetUserByUsername(db *sql.DB, username string) (User, error) {
 	return u, err
 }
 
+// GetUserByID はユーザーIDでユーザーを取得する。
 func GetUserByID(db *sql.DB, id int) (User, error) {
 	var u User
 	err := db.QueryRow(
@@ -42,6 +49,8 @@ func GetUserByID(db *sql.DB, id int) (User, error) {
 	return u, err
 }
 
+// CreateUser はパスワードをハッシュ化してユーザーをDBに登録し、作成したユーザーを返す。
+// departmentID は sysadmin 作成時に nil を渡す。
 func CreateUser(db *sql.DB, departmentID *int, username, password, displayName, role string) (User, error) {
 	hash, err := HashPassword(password)
 	if err != nil {
@@ -57,6 +66,7 @@ func CreateUser(db *sql.DB, departmentID *int, username, password, displayName, 
 	return u, err
 }
 
+// ListUsersByDepartment は指定部門に属するユーザーを表示名順で返す。
 func ListUsersByDepartment(db *sql.DB, departmentID int) ([]User, error) {
 	rows, err := db.Query(
 		"SELECT id, department_id, username, password_hash, display_name, role FROM users WHERE department_id = $1 ORDER BY display_name",
@@ -78,6 +88,7 @@ func ListUsersByDepartment(db *sql.DB, departmentID int) ([]User, error) {
 	return users, rows.Err()
 }
 
+// ListAllUsers は部門に所属する全ユーザーを表示名順で返す（sysadmin は除外）。
 func ListAllUsers(db *sql.DB) ([]User, error) {
 	rows, err := db.Query(
 		"SELECT id, department_id, username, password_hash, display_name, role FROM users WHERE department_id IS NOT NULL ORDER BY display_name",
@@ -98,19 +109,21 @@ func ListAllUsers(db *sql.DB) ([]User, error) {
 	return users, rows.Err()
 }
 
+// CountSysadmins はシステム管理者の人数を返す。初回起動時の初期ユーザー作成判定に使用する。
 func CountSysadmins(db *sql.DB) (int, error) {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'sysadmin'").Scan(&count)
 	return count, err
 }
 
+// UpdateUserRole はユーザーのロールを変更する（例: "user" → "admin"）。
 func UpdateUserRole(db *sql.DB, userID int, role string) error {
 	_, err := db.Exec("UPDATE users SET role = $1 WHERE id = $2", role, userID)
 	return err
 }
 
-// UpdateUserDepartment はユーザーの所属部門を変更し、そのユーザーが owner_id を持つ
-// 全アイテムの department_id も同じ部門に更新する。
+// UpdateUserDepartment はユーザーの所属部門を変更する。
+// ユーザーが保有するアイテムの部門も同時に新しい部門へ更新し、データの整合性を保つ。
 func UpdateUserDepartment(db *sql.DB, userID int, newDeptID int) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -127,6 +140,7 @@ func UpdateUserDepartment(db *sql.DB, userID int, newDeptID int) error {
 	return tx.Commit()
 }
 
+// UpdatePassword は新しいパスワードをハッシュ化してDBを更新する。
 func UpdatePassword(db *sql.DB, userID int, newPassword string) error {
 	hash, err := HashPassword(newPassword)
 	if err != nil {
@@ -136,8 +150,8 @@ func UpdatePassword(db *sql.DB, userID int, newPassword string) error {
 	return err
 }
 
-// DeleteUserCascade deletes a user along with their items and transactions.
-// Returns the image file paths that should be removed from the filesystem.
+// DeleteUserCascade はユーザーを削除し、関連するアイテム・取引履歴もまとめて削除する。
+// ファイルシステム上の画像を削除できるよう、削除対象の画像パス一覧を返す。
 func DeleteUserCascade(db *sql.DB, userID int) ([]string, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -145,7 +159,7 @@ func DeleteUserCascade(db *sql.DB, userID int) ([]string, error) {
 	}
 	defer tx.Rollback()
 
-	// Collect image paths for items owned or created by this user.
+	// 削除対象アイテムに紐づく画像パスを収集する（ファイル削除に使用）
 	rows, err := tx.Query(
 		`SELECT file_path FROM item_images
 		 WHERE item_id IN (SELECT id FROM items WHERE owner_id = $1 OR created_by = $1)`,
@@ -167,21 +181,21 @@ func DeleteUserCascade(db *sql.DB, userID int) ([]string, error) {
 		return nil, err
 	}
 
-	// Delete transactions involving this user.
+	// このユーザーが送信者または受信者の取引履歴を削除する
 	if _, err := tx.Exec(
 		"DELETE FROM transactions WHERE from_user_id = $1 OR to_user_id = $1", userID,
 	); err != nil {
 		return nil, err
 	}
 
-	// Delete items (item_images cascade automatically via ON DELETE CASCADE).
+	// アイテムを削除する（item_images は ON DELETE CASCADE で自動削除される）
 	if _, err := tx.Exec(
 		"DELETE FROM items WHERE owner_id = $1 OR created_by = $1", userID,
 	); err != nil {
 		return nil, err
 	}
 
-	// Delete the user.
+	// ユーザー本体を削除する
 	if _, err := tx.Exec("DELETE FROM users WHERE id = $1", userID); err != nil {
 		return nil, err
 	}

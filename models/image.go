@@ -6,12 +6,15 @@ import (
 	"strconv"
 )
 
+// ItemImage はアイテムに紐づく画像1枚を表す。
+// FilePath は "アイテムID/ファイル名.拡張子" 形式の相対パス（uploadsディレクトリ基準）。
 type ItemImage struct {
 	ID       int    `json:"id"`
 	ItemID   int    `json:"item_id"`
 	FilePath string `json:"file_path"`
 }
 
+// CreateItemImage は画像レコードをDBに登録して返す。
 func CreateItemImage(db *sql.DB, itemID int, filePath string) (ItemImage, error) {
 	var img ItemImage
 	err := db.QueryRow(
@@ -21,12 +24,14 @@ func CreateItemImage(db *sql.DB, itemID int, filePath string) (ItemImage, error)
 	return img, err
 }
 
+// GetItemImage は指定IDの画像レコードを取得する。
 func GetItemImage(db *sql.DB, id int) (ItemImage, error) {
 	var img ItemImage
 	err := db.QueryRow("SELECT id, item_id, file_path FROM item_images WHERE id = $1", id).Scan(&img.ID, &img.ItemID, &img.FilePath)
 	return img, err
 }
 
+// ListItemImages は指定アイテムの画像一覧をID順で返す。
 func ListItemImages(db *sql.DB, itemID int) ([]ItemImage, error) {
 	rows, err := db.Query("SELECT id, item_id, file_path FROM item_images WHERE item_id = $1 ORDER BY id", itemID)
 	if err != nil {
@@ -45,7 +50,8 @@ func ListItemImages(db *sql.DB, itemID int) ([]ItemImage, error) {
 	return imgs, rows.Err()
 }
 
-// ListItemImagesByItems returns images for multiple items, keyed by item ID.
+// ListItemImagesByItems は複数アイテムの画像を一度に取得し、アイテムIDをキーとするマップで返す。
+// 一覧表示時にN+1クエリを避けるために使用する。
 func ListItemImagesByItems(db *sql.DB, itemIDs []int) (map[int][]ItemImage, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -71,19 +77,22 @@ func ListItemImagesByItems(db *sql.DB, itemIDs []int) (map[int][]ItemImage, erro
 	return m, rows.Err()
 }
 
+// DeleteItemImage は画像レコードをDBから削除し、削除した画像のファイルパスを返す。
 func DeleteItemImage(db *sql.DB, imageID int) (string, error) {
 	var filePath string
 	err := db.QueryRow("DELETE FROM item_images WHERE id = $1 RETURNING file_path", imageID).Scan(&filePath)
 	return filePath, err
 }
 
+// CountItemImages は指定アイテムに紐づく画像の枚数を返す。
 func CountItemImages(db *sql.DB, itemID int) (int, error) {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM item_images WHERE item_id = $1", itemID).Scan(&count)
 	return count, err
 }
 
-// intArray implements driver.Valuer for PostgreSQL int[] syntax.
+// intArray は []int を PostgreSQL の配列リテラル（例: {1,2,3}）に変換するための型。
+// ANY($1) 構文でIN句の代わりに複数IDを渡す際に使用する。
 type intArray []int
 
 func (a intArray) Value() (driver.Value, error) {
