@@ -64,6 +64,12 @@ func main() {
 		log.Fatal("SESSION_KEY environment variable is not set. Please set a strong random key.")
 	}
 	store := sessions.NewCookieStore([]byte(sessionKey))
+	store.Options = &sessions.Options{
+		Path:     "/",
+		MaxAge:   86400 * 30,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
 
 	tmplFS, _ := fs.Sub(templateFS, "templates")
 	env := handlers.NewEnv(db, store, tmplFS)

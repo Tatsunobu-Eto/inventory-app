@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	mw "inventory-app/middleware"
@@ -33,7 +34,11 @@ func (e *Env) LoginPost(w http.ResponseWriter, r *http.Request) {
 
 	sess, _ := e.Store.Get(r, "session")
 	sess.Values["user_id"] = user.ID
-	sess.Save(r, w)
+	if err := sess.Save(r, w); err != nil {
+		log.Printf("session save error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
